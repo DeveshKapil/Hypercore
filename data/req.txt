@@ -1,54 +1,44 @@
 #!/bin/bash
 
-# Script to install all tools required for developing a bare-metal hypervisor
-# Tested on Ubuntu/Debian-based systems
+# Enable debugging to print each command as it is executed
+set -x
 
-# Exit on error
+# Exit immediately if any command fails (non-zero exit status)
 set -e
 
+# Update the package lists to ensure we have the latest information about available packages
 echo "Updating package lists..."
 sudo apt update
 
+# Install essential development tools required for hypervisor development
 echo "Installing essential development tools..."
+
+# Use `apt install` with the `-y` flag to automatically answer "yes" to prompts
 sudo apt install -y \
-    build-essential \       # GCC, make, etc.
-    git \                   # Version control
-    nasm \                  # Assembler for writing bootloader code
-    qemu-system-x86 \       # QEMU emulator for testing
-    gdb \                   # Debugger
-    xorriso \               # Tool for creating ISO images
-    mtools \                # Tools for working with FAT filesystems
-    libglib2.0-dev \        # Required for QEMU development
-    libfdt-dev \            # For working with device tree blobs
-    libpixman-1-dev \       # Pixel manipulation library for QEMU
-    flex \                  # Lexical analyzer generator
-    bison \                 # Parser generator
-    pkg-config \            # Helper tool for compiler flags
-    cmake \                 # Build system
-    clang \                 # Alternative compiler
-    llvm \                  # LLVM toolchain
-    python3 \               # Python interpreter
-    python3-pip \           # Python package manager
-    hexedit \               # Hex editor for inspecting binaries
-    vim \                   # Text editor (optional)
-    tmux \                  # Terminal multiplexer (optional)
+    build-essential \       # Compiler tools like GCC, make, etc.
+    git \                   # Version control system for managing code
+    nasm \                  # Assembler for writing low-level bootloader code
+    qemu-system-x86 \       # QEMU emulator for testing x86 virtual machines
+    gdb \                   # Debugger for analyzing and troubleshooting code
+    xorriso \               # Tool for creating ISO images (useful for bootable disks)
+    mtools \                # Utilities for working with FAT filesystems (used in bootloader development)
+    libglib2.0-dev \        # Development files for GLib (required for QEMU)
+    libfdt-dev \            # Library for working with device tree blobs (used in virtualization)
+    libpixman-1-dev \       # Pixel manipulation library (used by QEMU for graphics)
+    flex \                  # Lexical analyzer generator (useful for parsing)
+    bison \                 # Parser generator (complements flex)
+    pkg-config \            # Helper tool for retrieving compiler flags for libraries
+    cmake \                 # Cross-platform build system for managing complex projects
+    clang \                 # Alternative C/C++ compiler (LLVM-based)
+    llvm \                  # LLVM toolchain for compiling and optimizing code
+    python3 \               # Python interpreter (for scripting and automation)
+    python3-pip \           # Python package manager for installing additional libraries
+    hexedit \               # Hex editor for inspecting and modifying binary files
+    vim \                   # Text editor (optional but highly recommended)
+    tmux \                  # Terminal multiplexer for managing multiple terminal sessions
 
-echo "Installing additional Python packages..."
-pip3 install --user pyelftools  # For parsing ELF files
+# Disable debugging after the installation is complete
+set +x
 
-echo "Installing Intel Software Developer Manuals (optional)..."
-# Download Intel manuals (requires manual extraction and reading)
-mkdir -p ~/intel-manuals
-cd ~/intel-manuals
-wget https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual.pdf
-wget https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-system-programming-manual.pdf
-wget https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf
-wget https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3b-part-2-manual.pdf
-echo "Intel manuals downloaded to ~/intel-manuals"
-
-echo "Setting up QEMU alias for convenience..."
-echo 'alias qemu="qemu-system-x86_64"' >> ~/.bashrc
-source ~/.bashrc
-
+# Notify the user that the installation is complete
 echo "All tools installed successfully!"
-echo "You are now ready to start developing your bare-metal hypervisor."
