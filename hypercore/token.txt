@@ -1,4 +1,9 @@
 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
 
 
+find /lib /usr/lib -name libpthread.so.0
+
+LD_LIBRARY_PATH=/lib/x86_64-linux-gnu qemu-system-x86_64 -enable-kvm -cpu host -m 512 -serial mon:stdio -kernel hypervisor
+
+
 qemu-system-x86_64 -enable-kvm -cpu host -m 512 -serial mon:stdio -kernel hypervisor
