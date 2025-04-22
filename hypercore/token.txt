@@ -7,3 +7,17 @@ LD_LIBRARY_PATH=/lib/x86_64-linux-gnu qemu-system-x86_64 -enable-kvm -cpu host -
 
 
 qemu-system-x86_64 -enable-kvm -cpu host -m 512 -serial mon:stdio -kernel hypervisor
+
+
+gui
+
+cpu scheduling algo
+
+memory scheduling algo
+
+file manamgement system
+
+io manamgement system
+
+network manamgement
+
