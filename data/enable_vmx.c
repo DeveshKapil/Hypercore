@@ -11,7 +11,7 @@ static int __init enable_vmx_init(void) {
     // Read CR4
     cr4 = __read_cr4();
 
-    // Set VMXE (bit 13)
+    // Set VMXE (bit 13)+
     cr4 |= X86_CR4_VMXE;
 
     // Write back to CR4
