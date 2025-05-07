@@ -1,8 +1,12 @@
 #![no_std]
+#![feature(asm_const)]
+#![feature(naked_functions)]
 #![feature(abi_x86_interrupt)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
+
+extern crate alloc;
 
 use x86_64::instructions::interrupts::{enable, disable};
 use x86_64::structures::idt::InterruptDescriptorTable;
@@ -21,7 +25,7 @@ macro_rules! println {
 
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::vga_buffer::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::graphics::_print(format_args!($($arg)*)));
 }
 
 static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();

@@ -79,9 +79,7 @@ pub fn get_vmx_revision_id() -> u32 {
 }
 
 pub unsafe fn alloc_aligned(size: usize) -> *mut u8 {
-    // Simple aligned allocation for now
-    // In a real implementation, you'd want to use a proper memory allocator
-    let addr: *mut u8 = core::ptr::null_mut();
+    let mut addr: *mut u8 = core::ptr::null_mut();
     unsafe {
         asm!(
             "mov rax, 9", // mmap syscall
@@ -92,8 +90,9 @@ pub unsafe fn alloc_aligned(size: usize) -> *mut u8 {
             "mov r8, -1", // fd (-1)
             "mov r9, 0", // offset (0)
             "syscall",
-            in("rsi") size,
-            out("rax") addr,
+            "mov {addr}, rax",
+            size = in(reg) size,
+            addr = out(reg) addr,
             options(nostack, preserves_flags),
         );
     }

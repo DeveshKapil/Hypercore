@@ -1,25 +1,20 @@
 use core::hash::Hash;
-use alloc::collections::HashMap;
+use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::boxed::Box;
 
 pub struct LRUCache<K, V> {
+    cache: BTreeMap<K, (V, usize)>,
+    order: VecDeque<K>,
     capacity: usize,
-    cache: HashMap<K, (V, usize)>, // (value, timestamp)
-    access_order: VecDeque<K>,
-    timestamp: usize,
 }
 
-impl<K, V> LRUCache<K, V>
-where
-    K: Hash + Eq + Clone,
-{
+impl<K: Clone + Eq + Hash, V> LRUCache<K, V> {
     pub fn new(capacity: usize) -> Self {
         LRUCache {
+            cache: BTreeMap::new(),
+            order: VecDeque::with_capacity(capacity),
             capacity,
-            cache: HashMap::with_capacity(capacity),
-            access_order: VecDeque::with_capacity(capacity),
-            timestamp: 0,
         }
     }
 
@@ -34,29 +29,20 @@ where
     }
 
     pub fn insert(&mut self, key: K, value: V) {
-        if self.cache.contains_key(&key) {
-            // Update existing entry
-            self.cache.insert(key.clone(), (value, self.timestamp));
-            self.update_access_order(key);
-        } else {
-            // Check if we need to evict
-            if self.cache.len() >= self.capacity {
-                self.evict_least_recently_used();
+        if self.cache.len() >= self.capacity {
+            if let Some(old_key) = self.order.pop_front() {
+                self.cache.remove(&old_key);
             }
-            
-            // Insert new entry
-            self.cache.insert(key.clone(), (value, self.timestamp));
-            self.access_order.push_back(key);
         }
-        
-        self.timestamp += 1;
+        self.cache.insert(key.clone(), (value, self.order.len()));
+        self.order.push_back(key);
     }
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
         if let Some((value, _)) = self.cache.remove(key) {
             // Remove from access order
-            if let Some(pos) = self.access_order.iter().position(|k| k == key) {
-                self.access_order.remove(pos);
+            if let Some(pos) = self.order.iter().position(|k| k == key) {
+                self.order.remove(pos);
             }
             Some(value)
         } else {
@@ -78,23 +64,16 @@ where
 
     pub fn clear(&mut self) {
         self.cache.clear();
-        self.access_order.clear();
-        self.timestamp = 0;
+        self.order.clear();
     }
 
     fn update_access_order(&mut self, key: K) {
         // Remove old position
-        if let Some(pos) = self.access_order.iter().position(|k| k == &key) {
-            self.access_order.remove(pos);
+        if let Some(pos) = self.order.iter().position(|k| k == &key) {
+            self.order.remove(pos);
         }
         // Add to end (most recently used)
-        self.access_order.push_back(key);
-    }
-
-    fn evict_least_recently_used(&mut self) {
-        if let Some(key) = self.access_order.pop_front() {
-            self.cache.remove(&key);
-        }
+        self.order.push_back(key);
     }
 }
 

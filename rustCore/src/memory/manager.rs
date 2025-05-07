@@ -2,29 +2,30 @@ use super::lru::{PageCache, PageKey};
 use x86_64::{
     structures::paging::{
         PageTable, OffsetPageTable, PhysFrame, Size4KiB, FrameAllocator,
-        Mapper, Page, PageTableFlags,
+        Mapper, Page, PageTableFlags, Translate,
     },
     VirtAddr, PhysAddr,
 };
 use alloc::boxed::Box;
 use spin::Mutex;
+use core::ops::DerefMut;
 
 pub struct MemoryManager {
     page_table: OffsetPageTable<'static>,
     frame_allocator: Box<dyn FrameAllocator<Size4KiB>>,
-    page_cache: Mutex<PageCache>,
+    page_cache: PageCache,
 }
 
 impl MemoryManager {
     pub fn new(
         page_table: OffsetPageTable<'static>,
         frame_allocator: Box<dyn FrameAllocator<Size4KiB>>,
-        cache_capacity: usize,
+        cache_size: usize,
     ) -> Self {
         MemoryManager {
             page_table,
             frame_allocator,
-            page_cache: Mutex::new(PageCache::new(cache_capacity)),
+            page_cache: PageCache::new(cache_size),
         }
     }
 
@@ -34,22 +35,21 @@ impl MemoryManager {
             .ok_or("Failed to allocate frame")?;
 
         unsafe {
-            self.page_table.map_to(page, frame, flags, &mut *self.frame_allocator)?
+            self.page_table
+                .map_to(page, frame, flags, self.frame_allocator.deref_mut())
+                .map_err(|_| "Failed to map page")?
                 .flush();
         }
-
         Ok(())
     }
 
     pub fn unmap_page(&mut self, page: Page) -> Result<(), &'static str> {
         let (frame, _) = unsafe {
-            self.page_table.unmap(page)?
-                .1
-                .flush();
+            self.page_table
+                .unmap(page)
+                .map_err(|_| "Failed to unmap page")?
         };
-
-        // Add the frame back to the allocator
-        // Note: You'll need to implement a way to return frames to the allocator
+        frame.flush();
         Ok(())
     }
 
@@ -74,7 +74,7 @@ impl MemoryManager {
     }
 
     pub fn translate_addr(&self, addr: VirtAddr) -> Option<PhysAddr> {
-        self.page_table.translate_addr(addr)
+        self.page_table.translate(addr)
     }
 
     pub fn translate_addr_range(
@@ -82,12 +82,11 @@ impl MemoryManager {
         start: VirtAddr,
         size: usize,
     ) -> Option<(PhysAddr, usize)> {
-        let end = start + size;
         let start_page = Page::containing_address(start);
-        let end_page = Page::containing_address(end - 1);
+        let end_page = Page::containing_address(start + size - 1);
 
-        let start_frame = self.page_table.translate_page(start_page)?;
-        let end_frame = self.page_table.translate_page(end_page)?;
+        let start_frame = self.page_table.translate_page(start_page).ok()?;
+        let end_frame = self.page_table.translate_page(end_page).ok()?;
 
         let start_addr = start_frame.start_address();
         let end_addr = end_frame.start_address() + end_frame.size();
