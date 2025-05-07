@@ -189,4 +189,4 @@ mod tests {
         assert!(process.is_some());
         assert_eq!(process.unwrap().pid, 2);
     }
-} 
+}
