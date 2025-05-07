@@ -1,16 +1,29 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <asm/msr.h>
+#include <asm/cpufeature.h>
 
 static int __init enable_vmx_init(void) {
     unsigned long cr4;
 
     pr_info("Enabling VMX...\n");
 
+    // Check if CPU supports VMX
+    if (!boot_cpu_has(X86_FEATURE_VMX)) {
+        pr_err("CPU does not support VMX.\n");
+        return -ENODEV;
+    }
+
     // Read CR4
     cr4 = __read_cr4();
 
-    // Set VMXE (bit 13)+
+    // Already enabled?
+    if (cr4 & X86_CR4_VMXE) {
+        pr_info("VMX already enabled.\n");
+        return 0;
+    }
+
+    // Set VMXE bit (bit 13)
     cr4 |= X86_CR4_VMXE;
 
     // Write back to CR4
