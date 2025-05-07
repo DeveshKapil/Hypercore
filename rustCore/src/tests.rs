@@ -1,7 +1,9 @@
 use crate::{vmx, memory, interrupts, println};
 use bootloader::{BootInfo, entry_point};
 use x86_64::VirtAddr;
-
+use crate::print;
+use crate::println;
+use alloc::boxed::Box;
 entry_point!(test_kernel_main);
 
 fn test_kernel_main(boot_info: &'static BootInfo) -> ! {
