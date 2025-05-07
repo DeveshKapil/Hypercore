@@ -15,6 +15,9 @@ run:
 
 # Clean build artifacts
 clean:
+	rm -f *.o *.ko *.mod *.mod.c *.mod.o *.symvers *.order
+	rm -f .*.cmd
+	rm -f Module.symvers modules.order
 	cd rustCore && cargo clean
 	$(MAKE) -C $(KDIR) M=$(PWD)/rustCore/src clean
 

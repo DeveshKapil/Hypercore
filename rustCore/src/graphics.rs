@@ -1,5 +1,7 @@
 use core::fmt;
 use x86_64::instructions::port::Port;
+use crate::print;
+use crate::println;
 
 // Graphics mode constants
 pub const WIDTH: usize = 1920;
@@ -109,4 +111,48 @@ pub fn init_graphics() -> Option<GraphicsOutput> {
     // For now, we'll return None to indicate that graphics initialization
     // needs to be implemented
     None
+}
+
+pub struct GraphicsWriter {
+    port: Port<u8>,
+}
+
+impl GraphicsWriter {
+    pub fn new() -> Self {
+        GraphicsWriter {
+            port: Port::new(0x3F8), // COM1 port
+        }
+    }
+
+    pub fn write_byte(&mut self, byte: u8) {
+        unsafe {
+            self.port.write(byte);
+        }
+    }
+}
+
+impl fmt::Write for GraphicsWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for byte in s.bytes() {
+            self.write_byte(byte);
+        }
+        Ok(())
+    }
+}
+
+// #[macro_export]
+// macro_rules! print {
+//     ($($arg:tt)*) => ($crate::graphics::_print(format_args!($($arg)*)));
+// }
+
+// #[macro_export]
+// macro_rules! println {
+//     () => ($crate::print!("\n"));
+//     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+// }
+
+pub fn _print(args: fmt::Arguments) {
+    use core::fmt::Write;
+    let mut writer = GraphicsWriter::new();
+    writer.write_fmt(args).unwrap();
 } 
