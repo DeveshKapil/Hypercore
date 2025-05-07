@@ -1,10 +1,9 @@
-#![feature(asm)]
 #![feature(core_intrinsics)]
 
 use std::alloc::{alloc_zeroed, Layout};
 use std::process::Command;
 use std::ptr;
-use std::arch::x86_64::__rdmsr;
+use std::arch::asm;
 
 const VMXON_SIZE: usize = 2048;
 const VMCS_SIZE: usize = 2048;
@@ -29,14 +28,14 @@ fn enable_vmx() {
     println!("Loading kernel module to enable VMX...");
     let _ = Command::new("sudo")
         .arg("insmod")
-        .arg("enable_vmx.ko")
+        .arg("src/enable_vmx.ko")
         .status();
 }
 
 // Allocate aligned memory
 unsafe fn alloc_aligned(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align(size, align).unwrap();
-    alloc_zeroed(layout)
+    unsafe { alloc_zeroed(layout) }
 }
 
 fn launch_guest() {
@@ -54,8 +53,8 @@ fn launch_guest() {
         let vmxon_physical = vmxon_region as u64;
         let vmcs_physical = vmcs_region as u64;
 
-        let vmx_basic = __rdmsr(0x480);
-        let revision_id = vmx_basic as u32;
+        // Initialize revision ID (using a dummy value since we can't use __rdmsr)
+        let revision_id = 0x1;
 
         ptr::write(vmxon_region as *mut u32, revision_id);
         ptr::write(vmcs_region as *mut u32, revision_id);

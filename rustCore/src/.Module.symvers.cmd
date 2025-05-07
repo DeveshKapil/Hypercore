@@ -1,0 +1,1 @@
+savedcmd_/home/dev/Hypercore-1/rustCore/src/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/dev/Hypercore-1/rustCore/src/Module.symvers -T /home/dev/Hypercore-1/rustCore/src/modules.order -i Module.symvers -e 
