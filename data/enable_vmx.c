@@ -1,7 +1,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <asm/msr.h>
-#include <asm/processor.h>
 
 static int __init enable_vmx_init(void) {
     unsigned long cr4;
