@@ -1,9 +1,8 @@
 use alloc::collections::VecDeque;
-use alloc::boxed::Box;
 use core::time::Duration;
 use spin::Mutex;
 use lazy_static::lazy_static;
-
+use crate::println;
 // Process states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessState {
@@ -71,8 +70,8 @@ impl MultiFeedbackQueue {
     }
 
     pub fn schedule(&mut self) -> Option<&mut Process> {
-        // Try to get a process from each queue in order
         for level in 0..QUEUE_LEVELS {
+            println!("Queue {}: {:?}", level, self.queues[level]);
             if let Some(process) = self.queues[level].front_mut() {
                 match level {
                     0 | 1 => {
@@ -148,6 +147,15 @@ impl MultiFeedbackQueue {
                 break;
             }
         }
+    }
+
+    pub fn get_process_state(&self, pid: u64) -> Option<ProcessState> {
+        for queue in self.queues.iter() {
+            if let Some(process) = queue.iter().find(|p| p.pid == pid) {
+                return Some(process.state);
+            }
+        }
+        None
     }
 }
 

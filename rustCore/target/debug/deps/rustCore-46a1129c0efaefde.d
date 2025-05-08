@@ -1,14 +1,12 @@
-/home/dev/Hypercore-1/rustCore/target/debug/deps/rustCore-46a1129c0efaefde.d: src/lib.rs src/vmx.rs src/memory/mod.rs src/memory/lru.rs src/memory/manager.rs src/interrupts.rs src/tests.rs src/graphics.rs
+/home/dev/Hypercore-1/rustCore/target/debug/deps/rustCore-46a1129c0efaefde.d: src/lib.rs src/interrupts.rs src/vmx.rs src/process/mod.rs src/process/scheduler.rs src/process/manager.rs
 
-/home/dev/Hypercore-1/rustCore/target/debug/deps/librustCore-46a1129c0efaefde.rlib: src/lib.rs src/vmx.rs src/memory/mod.rs src/memory/lru.rs src/memory/manager.rs src/interrupts.rs src/tests.rs src/graphics.rs
+/home/dev/Hypercore-1/rustCore/target/debug/deps/librustCore-46a1129c0efaefde.rlib: src/lib.rs src/interrupts.rs src/vmx.rs src/process/mod.rs src/process/scheduler.rs src/process/manager.rs
 
-/home/dev/Hypercore-1/rustCore/target/debug/deps/librustCore-46a1129c0efaefde.rmeta: src/lib.rs src/vmx.rs src/memory/mod.rs src/memory/lru.rs src/memory/manager.rs src/interrupts.rs src/tests.rs src/graphics.rs
+/home/dev/Hypercore-1/rustCore/target/debug/deps/librustCore-46a1129c0efaefde.rmeta: src/lib.rs src/interrupts.rs src/vmx.rs src/process/mod.rs src/process/scheduler.rs src/process/manager.rs
 
 src/lib.rs:
-src/vmx.rs:
-src/memory/mod.rs:
-src/memory/lru.rs:
-src/memory/manager.rs:
 src/interrupts.rs:
-src/tests.rs:
-src/graphics.rs:
+src/vmx.rs:
+src/process/mod.rs:
+src/process/scheduler.rs:
+src/process/manager.rs:
