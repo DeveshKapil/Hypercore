@@ -93,26 +93,24 @@ impl MultiFeedbackQueue {
                         }
                     }
                     2 => {
-                        // HRNN for the final level
                         self.update_response_ratios();
+                        // Work with the queue as a local variable
+                        let queue = &mut self.queues[2];
                         // Find process with highest response ratio
                         let mut highest_ratio = 0.0;
                         let mut highest_idx = 0;
-                        
-                        for (i, p) in self.queues[2].iter().enumerate() {
+                        for (i, p) in queue.iter().enumerate() {
                             if p.response_ratio > highest_ratio {
                                 highest_ratio = p.response_ratio;
                                 highest_idx = i;
                             }
                         }
-                        
                         // Move the selected process to front
                         if highest_idx > 0 {
-                            let process = self.queues[2].remove(highest_idx).unwrap();
-                            self.queues[2].push_front(process);
+                            let process = queue.remove(highest_idx).unwrap();
+                            queue.push_front(process);
                         }
-                        
-                        return self.queues[2].front_mut();
+                        return queue.front_mut();
                     }
                     _ => unreachable!(),
                 }
