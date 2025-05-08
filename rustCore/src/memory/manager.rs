@@ -49,7 +49,6 @@ impl MemoryManager {
                 .unmap(page)
                 .map_err(|_| "Failed to unmap page")?
         };
-        frame.flush();
         Ok(())
     }
 
