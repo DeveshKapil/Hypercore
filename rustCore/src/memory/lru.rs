@@ -9,7 +9,7 @@ pub struct LRUCache<K, V> {
     capacity: usize,
 }
 
-impl<K: Clone + Eq + Hash, V> LRUCache<K, V> {
+impl<K: Clone + Eq + Hash + Ord, V> LRUCache<K, V> {
     pub fn new(capacity: usize) -> Self {
         LRUCache {
             cache: BTreeMap::new(),
@@ -19,13 +19,13 @@ impl<K: Clone + Eq + Hash, V> LRUCache<K, V> {
     }
 
     pub fn get(&mut self, key: &K) -> Option<&V> {
-        if let Some((value, _)) = self.cache.get(key) {
-            // Update access order
+        // First, get the value (immutable borrow)
+        let value = self.cache.get(key).map(|(v, _)| v);
+        // Then, if it exists, update access order (mutable borrow)
+        if value.is_some() {
             self.update_access_order(key.clone());
-            Some(value)
-        } else {
-            None
         }
+        value
     }
 
     pub fn insert(&mut self, key: K, value: V) {
@@ -97,7 +97,7 @@ impl PageCache {
 
     pub fn get_page(&mut self, address: u64, size: usize) -> Option<&[u8]> {
         let key = PageKey { address, size };
-        self.lru.get(&key)
+        self.lru.get(&key).map(|v| &**v)
     }
 
     pub fn insert_page(&mut self, address: u64, size: usize, data: Box<[u8]>) {
