@@ -14,18 +14,6 @@ pub mod graphics;
 extern crate alloc;
 
 #[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => ({
-        #[cfg(feature = "graphics")] {
-            $crate::graphics::_print(format_args!($($arg)*));
-        }
-        #[cfg(not(feature = "graphics"))] {
-            // fallback: do nothing or add serial output here
-        }
-    });
-}
-
-#[macro_export]
 macro_rules! println {
     () => ({
         #[cfg(feature = "graphics")] {
@@ -44,6 +32,19 @@ macro_rules! println {
         }
     });
 }
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ({
+        #[cfg(feature = "graphics")] {
+            $crate::graphics::_print(format_args!($($arg)*));
+        }
+        #[cfg(not(feature = "graphics"))] {
+            // fallback: do nothing or add serial output here
+        }
+    });
+}
+
 
 entry_point!(kernel_main);
 

@@ -2,7 +2,6 @@ use alloc::collections::VecDeque;
 use core::time::Duration;
 use spin::Mutex;
 use lazy_static::lazy_static;
-use crate::println;
 // Process states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessState {
@@ -69,52 +68,50 @@ impl MultiFeedbackQueue {
         self.queues[0].push_back(process);
     }
 
-    pub fn schedule(&mut self) -> Option<&mut Process> {
-        for level in 0..QUEUE_LEVELS {
-            println!("Queue {}: {:?}", level, self.queues[level]);
-            if let Some(process) = self.queues[level].front_mut() {
-                match level {
-                    0 | 1 => {
-                        // Round Robin for first two levels
-                        if process.remaining_time <= process.time_quantum {
-                            // Process will complete
-                            process.state = ProcessState::Running;
-                            return Some(process);
-                        } else {
-                            // Process needs more time
-                            process.remaining_time -= process.time_quantum;
-                            // Move to next level if in first queue
-                            if level == 0 {
-                                let mut process = self.queues[0].pop_front().unwrap();
-                                process.time_quantum = LEVEL2_QUANTUM;
-                                self.queues[1].push_back(process);
-                            }
-                            return Some(process);
-                        }
-                    }
-                    2 => {
-                        self.update_response_ratios();
-                        // Work with the queue as a local variable
-                        let queue = &mut self.queues[2];
-                        // Find process with highest response ratio
-                        let mut highest_ratio = 0.0;
-                        let mut highest_idx = 0;
-                        for (i, p) in queue.iter().enumerate() {
-                            if p.response_ratio > highest_ratio {
-                                highest_ratio = p.response_ratio;
-                                highest_idx = i;
-                            }
-                        }
-                        // Move the selected process to front
-                        if highest_idx > 0 {
-                            let process = queue.remove(highest_idx).unwrap();
-                            queue.push_front(process);
-                        }
-                        return queue.front_mut();
-                    }
-                    _ => unreachable!(),
+    pub fn schedule(&mut self) -> Option<u64> {
+        // Level 0: Round Robin, move to level 1 if not finished
+        if let Some(front_process) = self.queues[0].front() {
+            if front_process.remaining_time <= front_process.time_quantum {
+                // Process will complete
+                let process = self.queues[0].front_mut().unwrap();
+                process.state = ProcessState::Running;
+                return Some(process.pid);
+            } else {
+                // Move process to next level
+                let mut process = self.queues[0].pop_front().unwrap();
+                process.remaining_time -= process.time_quantum;
+                process.time_quantum = LEVEL2_QUANTUM;
+                self.queues[1].push_back(process);
+                // No process to return for level 0 this round
+            }
+        }
+        // Level 1: Round Robin, stay in level 1
+        if let Some(process) = self.queues[1].front_mut() {
+            if process.remaining_time <= process.time_quantum {
+                process.state = ProcessState::Running;
+                return Some(process.pid);
+            } else {
+                process.remaining_time -= process.time_quantum;
+                return Some(process.pid);
+            }
+        }
+        // Level 2: HRRN
+        if !self.queues[2].is_empty() {
+            self.update_response_ratios();
+            let queue = &mut self.queues[2];
+            let mut highest_ratio = 0.0;
+            let mut highest_idx = 0;
+            for (i, p) in queue.iter().enumerate() {
+                if p.response_ratio > highest_ratio {
+                    highest_ratio = p.response_ratio;
+                    highest_idx = i;
                 }
             }
+            if highest_idx > 0 {
+                let process = queue.remove(highest_idx).unwrap();
+                queue.push_front(process);
+            }
+            return queue.front().map(|p| p.pid);
         }
         None
     }
@@ -155,6 +152,61 @@ impl MultiFeedbackQueue {
         }
         None
     }
+
+    pub fn schedule_and<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Process),
+    {
+        for level in 0..QUEUE_LEVELS {
+            if let Some(process) = self.queues[level].front_mut() {
+                f(process);
+                match level {
+                    0 | 1 => {
+                        // Round Robin for first two levels
+                        if process.remaining_time <= process.time_quantum {
+                            // Process will complete
+                            process.state = ProcessState::Running;
+                        } else {
+                            // Process needs more time
+                            process.remaining_time -= process.time_quantum;
+                            // Move to next level if in first queue
+                            if level == 0 {
+                                let mut process = {
+                                    let queue0 = &mut self.queues[0];
+                                    queue0.pop_front().unwrap()
+                                };
+                                process.time_quantum = LEVEL2_QUANTUM;
+                                {
+                                    let queue1 = &mut self.queues[1];
+                                    queue1.push_back(process);
+                                }
+                            }
+                        }
+                    }
+                    2 => {
+                        self.update_response_ratios();
+                        // Work with the queue as a local variable
+                        let queue = &mut self.queues[2];
+                        // Find process with highest response ratio
+                        let mut highest_ratio = 0.0;
+                        let mut highest_idx = 0;
+                        for (i, p) in queue.iter().enumerate() {
+                            if p.response_ratio > highest_ratio {
+                                highest_ratio = p.response_ratio;
+                                highest_idx = i;
+                            }
+                        }
+                        // Move the selected process to front
+                        if highest_idx > 0 {
+                            let process = queue.remove(highest_idx).unwrap();
+                            queue.push_front(process);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
 }
 
 // Global scheduler instance
@@ -183,7 +235,7 @@ mod tests {
         // Test scheduling
         let process = scheduler.schedule();
         assert!(process.is_some());
-        assert_eq!(process.unwrap().pid, 1);
+        assert_eq!(process.unwrap(), 1);
         
         // Simulate some time passing
         scheduler.tick();
@@ -193,6 +245,6 @@ mod tests {
         scheduler.complete_process(1);
         let process = scheduler.schedule();
         assert!(process.is_some());
-        assert_eq!(process.unwrap().pid, 2);
+        assert_eq!(process.unwrap(), 2);
     }
 }

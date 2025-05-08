@@ -2,7 +2,6 @@ use super::scheduler::{Process, ProcessState, SCHEDULER};
 use core::time::Duration;
 use spin::Mutex;
 use lazy_static::lazy_static;
-use crate::println;
 
 pub struct ProcessManager {
     next_pid: u64,
@@ -38,21 +37,14 @@ impl ProcessManager {
         scheduler.get_process_state(pid)
     }
 
+    // The scheduler now returns Option<u64> (the PID), not a reference to Process
     pub fn schedule_next(&mut self) -> Option<u64> {
         let mut scheduler = SCHEDULER.lock();
-        scheduler.schedule().map(|p| p.pid)
+        scheduler.schedule()
     }
 
     pub fn tick(&mut self) {
         SCHEDULER.lock().tick();
-    }
-
-    pub fn with_scheduled_process<F, R>(&mut self, f: F) -> Option<R>
-    where
-        F: FnOnce(&mut Process) -> R,
-    {
-        let mut scheduler = SCHEDULER.lock();
-        scheduler.schedule().map(f)
     }
 }
 
