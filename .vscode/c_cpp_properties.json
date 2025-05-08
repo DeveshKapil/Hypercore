@@ -4,8 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/usr/src/linux-headers-$(shell uname -r)/include",
-                "/usr/src/linux-headers-$(shell uname -r)/arch/x86/include"
+                "/usr/src/linux-headers-6.8.0-59-generic/include",
+                "/usr/src/linux-headers-6.8.0-59-generic/arch/x86/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
