@@ -1,5 +1,10 @@
+// Updated for modern bootloader and graphics support.
 #![no_std]
+#![no_main]
 #![feature(abi_x86_interrupt)]
+
+use bootloader::{entry_point, BootInfo};
+
 pub mod interrupts;
 pub mod vmx;
 pub mod process;
@@ -22,6 +27,37 @@ macro_rules! print {
 
 #[macro_export]
 macro_rules! println {
-    () => (print!("\n"));
-    ($($arg:tt)*) => (print!("{}\n", format_args!($($arg)*)));
+    () => ({
+        #[cfg(feature = "graphics")] {
+            $crate::graphics::_print(format_args!("\n"));
+        }
+        #[cfg(not(feature = "graphics"))] {
+            // fallback: do nothing or add serial output here
+        }
+    });
+    ($($arg:tt)*) => ({
+        #[cfg(feature = "graphics")] {
+            $crate::graphics::_print(format_args!("{}\n", format_args!($($arg)*)));
+        }
+        #[cfg(not(feature = "graphics"))] {
+            // fallback: do nothing or add serial output here
+        }
+    });
+}
+
+entry_point!(kernel_main);
+
+fn kernel_main(boot_info: &'static BootInfo) -> ! {
+    #[cfg(feature = "graphics")]
+    if let Some(framebuffer) = boot_info.framebuffer.as_ref() {
+        let info = framebuffer.info();
+        let fb_addr = framebuffer.buffer().as_ptr() as *mut u8;
+        let width = info.width;
+        let height = info.height;
+        let pitch = info.stride * 4; // 4 bytes per pixel for 32bpp
+        let bpp = 32;
+        let mut writer = crate::graphics::FramebufferWriter::new(fb_addr, width, height, pitch, bpp);
+        // Now you can draw pixels!
+    }
+    loop {}
 } 

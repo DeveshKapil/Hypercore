@@ -3,6 +3,7 @@ use x86_64::structures::paging::mapper::{MapperFlush, MapToError, UnmapError};
 use super::SimpleFrameAllocator;
 use super::lru::{LRUCache, PageKey};
 use alloc::boxed::Box;
+use x86_64::{VirtAddr,PhysAddr};
 
 pub struct MemoryManager<'a, M: Mapper<Size4KiB>> {
     pub mapper: &'a mut M,
@@ -17,6 +18,18 @@ impl<'a, M: Mapper<Size4KiB>> MemoryManager<'a, M> {
             unsafe { self.mapper.map_to(page, frame, flags, self.frame_allocator) }
         } else {
             Err(MapToError::FrameAllocationFailed)
+        }
+    }
+
+    pub fn evict_and_deallocate(&mut self, address: u64, size: usize) -> Result<(), UnmapError> {
+        let key = PageKey { address, size };
+        if self.lru.remove(&key).is_some() {
+            let page = Page::containing_address(VirtAddr::new(address));
+            let (frame, _flush) = self.unmap_page(page)?;
+            // Frame is deallocated in unmap_page
+            Ok(())
+        } else {
+            Err(UnmapError::PageNotMapped)
         }
     }
 

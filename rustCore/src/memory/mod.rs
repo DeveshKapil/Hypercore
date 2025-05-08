@@ -38,15 +38,3 @@ unsafe impl FrameAllocator<Size4KiB> for SimpleFrameAllocator {
 
 pub mod lru;
 pub mod manager; 
-
-pub fn evict_and_deallocate(&mut self, address: u64, size: usize) -> Result<(), UnmapError> {
-    let key = PageKey { address, size };
-    if self.lru.remove(&key).is_some() {
-        let page = Page::containing_address(VirtAddr::new(address));
-        let (frame, _flush) = self.unmap_page(page)?;
-        // Frame is deallocated in unmap_page
-        Ok(())
-    } else {
-        Err(UnmapError::PageNotMapped)
-    }
-} 
