@@ -1,8 +1,8 @@
 use super::scheduler::{Process, ProcessState, SCHEDULER};
-use alloc::boxed::Box;
 use core::time::Duration;
 use spin::Mutex;
 use lazy_static::lazy_static;
+use crate::println;
 
 pub struct ProcessManager {
     next_pid: u64,
@@ -35,21 +35,24 @@ impl ProcessManager {
 
     pub fn get_process_state(&self, pid: u64) -> Option<ProcessState> {
         let scheduler = SCHEDULER.lock();
-        // Search through all queues for the process
-        for queue in scheduler.queues.iter() {
-            if let Some(process) = queue.iter().find(|p| p.pid == pid) {
-                return Some(process.state);
-            }
-        }
-        None
+        scheduler.get_process_state(pid)
     }
 
-    pub fn schedule_next(&mut self) -> Option<&mut Process> {
-        SCHEDULER.lock().schedule()
+    pub fn schedule_next(&mut self) -> Option<u64> {
+        let mut scheduler = SCHEDULER.lock();
+        scheduler.schedule().map(|p| p.pid)
     }
 
     pub fn tick(&mut self) {
         SCHEDULER.lock().tick();
+    }
+
+    pub fn with_scheduled_process<F, R>(&mut self, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut Process) -> R,
+    {
+        let mut scheduler = SCHEDULER.lock();
+        scheduler.schedule().map(f)
     }
 }
 
