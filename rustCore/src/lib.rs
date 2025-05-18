@@ -11,39 +11,9 @@ pub mod process;
 pub mod memory;
 pub mod graphics;
 
+
+
 extern crate alloc;
-
-#[macro_export]
-macro_rules! println {
-    () => ({
-        #[cfg(feature = "graphics")] {
-            $crate::graphics::_print(format_args!("\n"));
-        }
-        #[cfg(not(feature = "graphics"))] {
-            // fallback: do nothing or add serial output here
-        }
-    });
-    ($($arg:tt)*) => ({
-        #[cfg(feature = "graphics")] {
-            $crate::graphics::_print(format_args!("{}\n", format_args!($($arg)*)));
-        }
-        #[cfg(not(feature = "graphics"))] {
-            // fallback: do nothing or add serial output here
-        }
-    });
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => ({
-        #[cfg(feature = "graphics")] {
-            $crate::graphics::_print(format_args!($($arg)*));
-        }
-        #[cfg(not(feature = "graphics"))] {
-            // fallback: do nothing or add serial output here
-        }
-    });
-}
 
 
 entry_point!(kernel_main);

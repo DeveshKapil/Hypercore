@@ -1,6 +1,39 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 use lazy_static::lazy_static;
-use crate::println;
+
+
+#[macro_export]
+macro_rules! println {
+    () => ({
+        #[cfg(feature = "graphics")] {
+            $crate::graphics::_print(format_args!("\n"));
+        }
+        #[cfg(not(feature = "graphics"))] {
+            // fallback: do nothing or add serial output here
+        }
+    });
+    ($($arg:tt)*) => ({
+        #[cfg(feature = "graphics")] {
+            $crate::graphics::_print(format_args!("{}\n", format_args!($($arg)*)));
+        }
+        #[cfg(not(feature = "graphics"))] {
+            // fallback: do nothing or add serial output here
+        }
+    });
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ({
+        #[cfg(feature = "graphics")] {
+            $crate::graphics::_print(format_args!($($arg)*));
+        }
+        #[cfg(not(feature = "graphics"))] {
+            // fallback: do nothing or add serial output here
+        }
+    });
+}
+
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -26,7 +59,7 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: x86_64::structures::idt::PageFaultErrorCode,
 ) {
-    use x86_64::registers::control::Cr2;
+    //use x86_64::registers::control::Cr2;
 
     println!("EXCEPTION: PAGE FAULT");
     println!("Accessed Address: {:?}", Cr2::read());
