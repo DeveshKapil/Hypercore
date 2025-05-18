@@ -50,14 +50,14 @@ pub fn init_idt() {
 }
 
 extern "x86-interrupt" fn breakpoint_handler(
-    stack_frame: InterruptStackFrame)
+    _stack_frame: InterruptStackFrame)
 {
     println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn page_fault_handler(
-    stack_frame: InterruptStackFrame,
-    error_code: x86_64::structures::idt::PageFaultErrorCode,
+    _stack_frame: InterruptStackFrame,
+    _error_code: x86_64::structures::idt::PageFaultErrorCode,
 ) {
     //use x86_64::registers::control::Cr2;
 

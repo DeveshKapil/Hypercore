@@ -18,7 +18,7 @@ extern crate alloc;
 
 entry_point!(kernel_main);
 
-fn kernel_main(boot_info: &'static BootInfo) -> ! {
+fn kernel_main(_boot_info: &'static BootInfo) -> ! {
     #[cfg(feature = "graphics")]
     if let Some(framebuffer) = boot_info.framebuffer.as_ref() {
         let info = framebuffer.info();
