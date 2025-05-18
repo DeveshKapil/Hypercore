@@ -1,7 +1,7 @@
 use core::arch::asm;
 
 const VMXON_SIZE: usize = 4096;
-const VMCS_SIZE: usize = 4096;
+// const VMCS_SIZE: usize = 4096;
 
 pub fn init() {
     if !is_vtx_supported() {
@@ -79,7 +79,7 @@ pub fn get_vmx_revision_id() -> u32 {
 }
 
 pub unsafe fn alloc_aligned(size: usize) -> *mut u8 {
-    let mut addr: *mut u8 = core::ptr::null_mut();
+    let mut _addr: *mut u8 = core::ptr::null_mut();
     unsafe {
         asm!(
             "mov rax, 9", // mmap syscall
@@ -92,9 +92,9 @@ pub unsafe fn alloc_aligned(size: usize) -> *mut u8 {
             "syscall",
             "mov {addr}, rax",
             size = in(reg) size,
-            addr = out(reg) addr,
+            addr = out(reg) _addr,
             options(nostack, preserves_flags),
         );
     }
-    addr
+    _addr
 } 
