@@ -1,10 +1,10 @@
 // Minimal memory management module
 // Only core logic, no LRU or advanced caching
 
-use x86_64::structures::paging::{PageTable, PhysFrame, Size4KiB, FrameAllocator};
-use x86_64::{VirtAddr, PhysAddr};
+use x86_64::structures::paging::{PhysFrame, Size4KiB, FrameAllocator};
+use x86_64::PhysAddr;
 use alloc::vec::Vec;
-use x86_64::structures::paging::mapper::UnmapError;
+//use x86_64::structures::paging::mapper::UnmapError;
 
 pub struct SimpleFrameAllocator {
     next: u64,

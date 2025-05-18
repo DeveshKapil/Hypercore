@@ -3,7 +3,7 @@ use x86_64::structures::paging::mapper::{MapperFlush, MapToError, UnmapError};
 use super::SimpleFrameAllocator;
 use super::lru::{LRUCache, PageKey};
 use alloc::boxed::Box;
-use x86_64::{VirtAddr,PhysAddr};
+use x86_64::VirtAddr;
 
 pub struct MemoryManager<'a, M: Mapper<Size4KiB>> {
     pub mapper: &'a mut M,
