@@ -1,10 +1,7 @@
-use core::fmt::{self, Write};
-
-const FRAMEBUFFER: *mut u8 = 0xb8000 as *mut u8;
+use core::fmt;
 
 pub struct FramebufferWriter {
-    col: usize,
-    row: usize,
+    fb_addr: *mut u8,
     width: usize,
     height: usize,
     pitch: usize, // bytes per row
@@ -12,42 +9,42 @@ pub struct FramebufferWriter {
 }
 
 impl FramebufferWriter {
-    pub fn new(width: usize, height: usize, pitch: usize, bpp: usize, fb_addr: *mut u8) -> Self {
+    pub fn new(fb_addr: *mut u8, width: usize, height: usize, pitch: usize, bpp: usize) -> Self {
         FramebufferWriter {
-            col: 0,
-            row: 0,
+            fb_addr,
             width,
             height,
             pitch,
             bpp,
-            // Store fb_addr if you want to support multiple framebuffers
         }
     }
 
+    /// Write a pixel at (x, y) with the given color (ARGB or RGB depending on bpp)
     pub fn write_pixel(&mut self, x: usize, y: usize, color: u32) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
         let offset = y * self.pitch + x * self.bpp;
         unsafe {
-            let ptr = FRAMEBUFFER.add(offset);
-            // For 32bpp (ARGB)
-            *(ptr as *mut u32) = color;
-        }
-    }
-}
-
-impl Write for FramebufferWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        for byte in s.bytes() {
-            unsafe {
-                *FRAMEBUFFER.add(self.col * 2) = byte;
-                *FRAMEBUFFER.add(self.col * 2 + 1) = 0x0f; // white on black
+            let ptr = self.fb_addr.add(offset);
+            match self.bpp {
+                4 => *(ptr as *mut u32) = color, // 32bpp (ARGB/RGBA)
+                3 => {
+                    // 24bpp (RGB)
+                    let bytes = color.to_le_bytes();
+                    *ptr = bytes[0];
+                    *ptr.add(1) = bytes[1];
+                    *ptr.add(2) = bytes[2];
+                }
+                _ => {}
             }
-            self.col += 1;
         }
-        Ok(())
     }
+
+    // Optionally, add more drawing routines here (rect, line, etc.)
 }
 
-pub fn _print(args: fmt::Arguments) {
-    let mut writer = FramebufferWriter::new(0, 0, 0, 0, FRAMEBUFFER);
-    let _ = writer.write_fmt(args);
+// Print function for debug output (no text rendering, just a stub)
+pub fn _print(_args: fmt::Arguments) {
+    // No-op or implement pixel-based text rendering if needed
 } 
