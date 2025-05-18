@@ -1,3 +1,7 @@
+use crate::net::ethernet::EthernetDevice;
+use crate::net::wifi::WifiDevice;
+use crate::net::bluetooth::BluetoothDevice;
+
 pub enum NetworkType {
     Ethernet,
     Wifi,
@@ -16,38 +20,31 @@ pub trait NetworkManager {
     fn configure(&self, config: &NetworkConfig) -> Result<(), &'static str>;
 }
 
-pub struct DummyNetwork;
-
-
-pub struct RealNetwork; // Replace with your real implementation
+pub struct RealNetwork;
 
 impl NetworkManager for RealNetwork {
     fn configure(&self, config: &NetworkConfig) -> Result<(), &'static str> {
         match config.net_type {
             NetworkType::Ethernet => {
-                // Example: Print MAC address and simulate configuration
-                crate::println!("Ethernet configured with MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                    config.mac_address[0], config.mac_address[1], config.mac_address[2],
-                    config.mac_address[3], config.mac_address[4], config.mac_address[5]);
+                let eth = EthernetDevice::new();
+                // Optionally, set MAC or other config here
+                // Example: send a test packet (empty)
+                eth.send(&[]);
                 Ok(())
             }
             NetworkType::Wifi => {
+                let mut wifi = WifiDevice::new();
                 if let (Some(ssid), Some(password)) = (config.ssid, config.password) {
-                    crate::println!("WiFi configured: SSID='{}', Password='{}', MAC={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                        ssid, password,
-                        config.mac_address[0], config.mac_address[1], config.mac_address[2],
-                        config.mac_address[3], config.mac_address[4], config.mac_address[5]);
-                    Ok(())
+                    wifi.connect(ssid, password)
                 } else {
                     Err("WiFi configuration requires SSID and password")
                 }
             }
             NetworkType::Bluetooth => {
-                // Example: Print MAC address and simulate configuration
-                crate::println!("Bluetooth configured with MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                    config.mac_address[0], config.mac_address[1], config.mac_address[2],
-                    config.mac_address[3], config.mac_address[4], config.mac_address[5]);
-                Ok(())
+                let bt = BluetoothDevice::new();
+                // Example: try to pair with a dummy address
+                let dummy_addr = [0u8; 6];
+                bt.pair(dummy_addr)
             }
         }
     }
