@@ -21,5 +21,9 @@ clean:
 	cd rustCore && cargo clean
 	$(MAKE) -C $(KDIR) M=$(PWD)/rustCore/src clean
 
+bootloader:
+	cargo install bootimage
+	cargo bootimage
+	
 # Default target
 all: build 

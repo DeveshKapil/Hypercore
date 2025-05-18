@@ -1,4 +1,3 @@
-// Updated for modern bootloader and graphics support.
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
@@ -10,7 +9,8 @@ pub mod vmx;
 pub mod process;
 pub mod memory;
 pub mod graphics;
-
+pub mod ceph;
+pub mod network;
 
 
 extern crate alloc;
