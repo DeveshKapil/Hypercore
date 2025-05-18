@@ -56,15 +56,16 @@ extern "x86-interrupt" fn breakpoint_handler(
 }
 
 extern "x86-interrupt" fn page_fault_handler(
-    _stack_frame: InterruptStackFrame,
-    _error_code: x86_64::structures::idt::PageFaultErrorCode,
+    stack_frame: InterruptStackFrame,
+    error_code: x86_64::structures::idt::PageFaultErrorCode,
 ) {
-    //use x86_64::registers::control::Cr2;
-
-    println!("EXCEPTION: PAGE FAULT");
-    println!("Accessed Address: {:?}", Cr2::read());
-    println!("Error Code: {:?}", error_code);
-    println!("{:#?}", stack_frame);
+    use x86_64::registers::control::Cr2;
+    let addr = Cr2::read().as_u64();
+    crate::memory::paging::handle_page_fault(addr, error_code.bits());
+    crate::println!("EXCEPTION: PAGE FAULT");
+    crate::println!("Accessed Address: {:?}", addr);
+    crate::println!("Error Code: {:?}", error_code);
+    crate::println!("{:#?}", stack_frame);
     loop {}
 }
 

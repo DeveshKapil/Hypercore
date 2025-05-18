@@ -5,7 +5,7 @@ use x86_64::structures::paging::{PhysFrame, Size4KiB, FrameAllocator};
 use x86_64::PhysAddr;
 use alloc::vec::Vec;
 //use x86_64::structures::paging::mapper::UnmapError;
-
+pub mod paging;
 pub struct SimpleFrameAllocator {
     next: u64,
     end: u64,
@@ -22,7 +22,7 @@ impl SimpleFrameAllocator {
     }
 }
 
-unsafe impl FrameAllocator<Size4KiB> for SimpleFrameAllocator {
+impl FrameAllocator<Size4KiB> for SimpleFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
         if let Some(addr) = self.free_list.pop() {
             Some(PhysFrame::containing_address(PhysAddr::new(addr)))
