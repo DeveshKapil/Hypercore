@@ -25,7 +25,7 @@ impl<'a, M: Mapper<Size4KiB>> MemoryManager<'a, M> {
         let key = PageKey { address, size };
         if self.lru.remove(&key).is_some() {
             let page = Page::containing_address(VirtAddr::new(address));
-            let (frame, _flush) = self.unmap_page(page)?;
+            let _flush= self.unmap_page(page)?;
             // Frame is deallocated in unmap_page
             Ok(())
         } else {
@@ -35,7 +35,7 @@ impl<'a, M: Mapper<Size4KiB>> MemoryManager<'a, M> {
 
     pub fn unmap_page(&mut self, page: Page) -> Result<(PhysFrame<Size4KiB>, MapperFlush<Size4KiB>), UnmapError> {
         // SAFETY: caller must ensure the page is mapped
-        let (frame, flush) = unsafe { self.mapper.unmap(page)? };
+        let (frame, flush) = { self.mapper.unmap(page)? };
         self.frame_allocator.deallocate_frame(frame);
         Ok((frame, flush))
     }

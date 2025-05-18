@@ -35,7 +35,7 @@ impl Process {
             arrival_time,
             waiting_time: Duration::from_secs(0),
             response_ratio: 0.0,
-            time_quantum: Duration::from_millis(100), // Default quantum
+            time_quantum: LEVEL1_QUANTUM, // Default quantum
             remaining_time: burst_time,
         }
     }
@@ -48,8 +48,8 @@ impl Process {
 
 // Queue levels
 const QUEUE_LEVELS: usize = 3;
-const LEVEL1_QUANTUM: Duration = Duration::from_millis(100);
-const LEVEL2_QUANTUM: Duration = Duration::from_millis(200);
+const LEVEL1_QUANTUM: Duration = Duration::from_millis(2);
+const LEVEL2_QUANTUM: Duration = Duration::from_millis(8);
 
 pub struct MultiFeedbackQueue {
     queues: [VecDeque<Process>; QUEUE_LEVELS],
