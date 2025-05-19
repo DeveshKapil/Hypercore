@@ -10,9 +10,12 @@ pub enum EthernetError {
 
 pub trait EthernetDriver {
     fn get_mac(&self) -> [u8; 6];
+    fn link_status(&self) -> Result<bool, EthernetError>;
+    fn scan(&self) -> Result<Vec<[u8; 6]>, EthernetError>; // List of MACs on LAN (optional)
+    fn connect(&self) -> Result<(), EthernetError>;
+    fn disconnect(&self) -> Result<(), EthernetError>;
     fn send(&self, data: &[u8]) -> Result<(), EthernetError>;
     fn receive(&self, buffer: &mut [u8]) -> Result<usize, EthernetError>;
-    // Add more trait methods as needed
 }
 
 pub enum EthernetBackend {
@@ -53,5 +56,32 @@ impl EthernetDevice {
             EthernetBackend::Usb(usb) => usb.receive(buffer),
         }
     }
-    // Add more methods as needed, dispatching to the backend
+
+    pub fn link_status(&self) -> Result<bool, EthernetError> {
+        match &self.backend {
+            EthernetBackend::Pci(pci) => pci.link_status(),
+            EthernetBackend::Usb(usb) => usb.link_status(),
+        }
+    }
+
+    pub fn scan(&self) -> Result<Vec<[u8; 6]>, EthernetError> {
+        match &self.backend {
+            EthernetBackend::Pci(pci) => pci.scan(),
+            EthernetBackend::Usb(usb) => usb.scan(),
+        }
+    }
+
+    pub fn connect(&self) -> Result<(), EthernetError> {
+        match &self.backend {
+            EthernetBackend::Pci(pci) => pci.connect(),
+            EthernetBackend::Usb(usb) => usb.connect(),
+        }
+    }
+
+    pub fn disconnect(&self) -> Result<(), EthernetError> {
+        match &self.backend {
+            EthernetBackend::Pci(pci) => pci.disconnect(),
+            EthernetBackend::Usb(usb) => usb.disconnect(),
+        }
+    }
 }

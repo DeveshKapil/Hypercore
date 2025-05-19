@@ -11,8 +11,9 @@ pub enum BluetoothError {
 
 pub trait BluetoothDriver {
     fn get_mac(&self) -> [u8; 6];
+    fn scan(&self) -> Result<Vec<[u8; 6]>, BluetoothError>;
     fn pair(&self, device_addr: [u8; 6]) -> Result<(), BluetoothError>;
-    // Add more trait methods as needed
+    fn disconnect(&self, device_addr: [u8; 6]) -> Result<(), BluetoothError>;
 }
 
 pub enum BluetoothBackend {
@@ -44,6 +45,22 @@ impl BluetoothDevice {
             return Ok(BluetoothDevice { mac, backend: BluetoothBackend::Uart(uart) });
         }
         Err(BluetoothError::DeviceNotFound)
+    }
+
+    pub fn scan(&self) -> Result<Vec<[u8; 6]>, BluetoothError> {
+        match &self.backend {
+            BluetoothBackend::Usb(usb) => usb.scan(),
+            BluetoothBackend::Pci(pci) => pci.scan(),
+            BluetoothBackend::Uart(uart) => uart.scan(),
+        }
+    }
+
+    pub fn disconnect(&self, device_addr: [u8; 6]) -> Result<(), BluetoothError> {
+        match &self.backend {
+            BluetoothBackend::Usb(usb) => usb.disconnect(device_addr),
+            BluetoothBackend::Pci(pci) => pci.disconnect(device_addr),
+            BluetoothBackend::Uart(uart) => uart.disconnect(device_addr),
+        }
     }
 
     pub fn pair(&self, device_addr: [u8; 6]) -> Result<(), BluetoothError> {
