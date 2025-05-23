@@ -4,29 +4,58 @@ use super::SimpleFrameAllocator;
 use super::lru::{LRUCache, PageKey};
 use alloc::boxed::Box;
 use x86_64::VirtAddr;
+use alloc::vec;
+use alloc::vec::Vec;
+use alloc::string::String;
+use alloc::string::ToString;
 
-pub struct MemoryManager<'a, M: Mapper<Size4KiB>> {
+use crate::STORAGE;
+use crate::storage::{StorageBackend, BlockStorage, RamDisk};
+
+
+pub const PAGE_SIZE: usize = 4096;
+
+pub struct MemoryManager<'a, M: Mapper<Size4KiB>, S: StorageBackend> {
     pub mapper: &'a mut M,
     pub frame_allocator: &'a mut SimpleFrameAllocator,
     pub lru: LRUCache,
+    pub storage_backend: &'a S,
 }
 
-impl<'a, M: Mapper<Size4KiB>> MemoryManager<'a, M> {
+impl<'a, M: Mapper<Size4KiB>, S: StorageBackend> MemoryManager<'a, M, S> {
     pub fn map_page(&mut self, page: Page, flags: PageTableFlags) -> Result<MapperFlush<Size4KiB>, MapToError<Size4KiB>> {
         if let Some(frame) = self.frame_allocator.allocate_frame() {
             // SAFETY: caller must ensure the page is unused
             unsafe { self.mapper.map_to(page, frame, flags, self.frame_allocator) }
         } else {
-            Err(MapToError::FrameAllocationFailed)
+            // Evict LRU page if out of frames
+            if let Some((evict_addr, evict_size)) = self.lru.order.front().map(|k| (k.address, k.size)) {
+                self.evict_and_deallocate(evict_addr, evict_size).ok();
+                // Try again after eviction
+                if let Some(frame) = self.frame_allocator.allocate_frame() {
+                    unsafe { self.mapper.map_to(page, frame, flags, self.frame_allocator) }
+                } else {
+                    Err(MapToError::FrameAllocationFailed)
+                }
+            } else {
+                Err(MapToError::FrameAllocationFailed)
+            }
         }
     }
 
     pub fn evict_and_deallocate(&mut self, address: u64, size: usize) -> Result<(), UnmapError> {
         let key = PageKey { address, size };
+        let page = Page::containing_address(VirtAddr::new(address));
+        // Read page data before unmapping
+        let data = unsafe {
+            let ptr = address as *const u8;
+            let mut buf = vec![0u8; size];
+            core::ptr::copy_nonoverlapping(ptr, buf.as_mut_ptr(), size);
+            buf.into_boxed_slice()
+        };
+        self.cache_page(address, size, data);
         if self.lru.remove(&key).is_some() {
-            let page = Page::containing_address(VirtAddr::new(address));
-            let _flush= self.unmap_page(page)?;
-            // Frame is deallocated in unmap_page
+            let _flush = self.unmap_page(page)?;
             Ok(())
         } else {
             Err(UnmapError::PageNotMapped)
@@ -55,4 +84,4 @@ impl<'a, M: Mapper<Size4KiB>> MemoryManager<'a, M> {
         let key = PageKey { address, size };
         self.lru.remove(&key)
     }
-} 
+}

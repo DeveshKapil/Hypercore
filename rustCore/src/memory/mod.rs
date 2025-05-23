@@ -22,7 +22,7 @@ impl SimpleFrameAllocator {
     }
 }
 
-impl FrameAllocator<Size4KiB> for SimpleFrameAllocator {
+unsafe impl FrameAllocator<Size4KiB> for SimpleFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
         if let Some(addr) = self.free_list.pop() {
             Some(PhysFrame::containing_address(PhysAddr::new(addr)))
