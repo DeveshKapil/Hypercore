@@ -21,3 +21,5 @@ io manamgement system
 
 network manamgement
 
+uefi = "0.25"
+uefi-services = "0.22"
