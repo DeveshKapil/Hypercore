@@ -5,13 +5,7 @@ use super::lru::{LRUCache, PageKey};
 use alloc::boxed::Box;
 use x86_64::VirtAddr;
 use alloc::vec;
-use alloc::vec::Vec;
-use alloc::string::String;
-use alloc::string::ToString;
-
-use crate::STORAGE;
-use crate::storage::{StorageBackend, BlockStorage, RamDisk};
-
+use crate::storage::StorageBackend;
 
 pub const PAGE_SIZE: usize = 4096;
 
@@ -25,13 +19,10 @@ pub struct MemoryManager<'a, M: Mapper<Size4KiB>, S: StorageBackend> {
 impl<'a, M: Mapper<Size4KiB>, S: StorageBackend> MemoryManager<'a, M, S> {
     pub fn map_page(&mut self, page: Page, flags: PageTableFlags) -> Result<MapperFlush<Size4KiB>, MapToError<Size4KiB>> {
         if let Some(frame) = self.frame_allocator.allocate_frame() {
-            // SAFETY: caller must ensure the page is unused
             unsafe { self.mapper.map_to(page, frame, flags, self.frame_allocator) }
         } else {
-            // Evict LRU page if out of frames
             if let Some((evict_addr, evict_size)) = self.lru.order.front().map(|k| (k.address, k.size)) {
                 self.evict_and_deallocate(evict_addr, evict_size).ok();
-                // Try again after eviction
                 if let Some(frame) = self.frame_allocator.allocate_frame() {
                     unsafe { self.mapper.map_to(page, frame, flags, self.frame_allocator) }
                 } else {
@@ -46,7 +37,6 @@ impl<'a, M: Mapper<Size4KiB>, S: StorageBackend> MemoryManager<'a, M, S> {
     pub fn evict_and_deallocate(&mut self, address: u64, size: usize) -> Result<(), UnmapError> {
         let key = PageKey { address, size };
         let page = Page::containing_address(VirtAddr::new(address));
-        // Read page data before unmapping
         let data = unsafe {
             let ptr = address as *const u8;
             let mut buf = vec![0u8; size];
@@ -63,13 +53,11 @@ impl<'a, M: Mapper<Size4KiB>, S: StorageBackend> MemoryManager<'a, M, S> {
     }
 
     pub fn unmap_page(&mut self, page: Page) -> Result<(PhysFrame<Size4KiB>, MapperFlush<Size4KiB>), UnmapError> {
-        // SAFETY: caller must ensure the page is mapped
         let (frame, flush) = { self.mapper.unmap(page)? };
         self.frame_allocator.deallocate_frame(frame);
         Ok((frame, flush))
     }
 
-    // LRU cache methods
     pub fn cache_page(&mut self, address: u64, size: usize, data: Box<[u8]>) {
         let key = PageKey { address, size };
         self.lru.put(key, data);

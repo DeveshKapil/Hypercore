@@ -9,14 +9,14 @@ pub mod vmx;
 pub mod process;
 pub mod memory;
 pub mod graphics;
-pub mod ceph;
 pub mod network;
 pub mod storage;
+pub mod net;
+pub mod gui;
 
 pub use storage::{BlockDevice, StorageBackend, BlockStorage, RamDisk};
 
 extern crate alloc;
-
 
 entry_point!(kernel_main);
 
@@ -28,9 +28,23 @@ fn kernel_main(_boot_info: &'static BootInfo) -> ! {
         let width = info.width;
         let height = info.height;
         let pitch = info.stride * 4; // 4 bytes per pixel for 32bpp
-        let bpp = 32;
+        let bpp = 4;
         let mut writer = crate::graphics::FramebufferWriter::new(fb_addr, width, height, pitch, bpp);
-        // Now you can draw pixels!
+        let mut gui = crate::gui::Gui::new(&mut writer);
+        // Simple demo input loop: cycle through menu options 1-9, then exit
+        let mut demo_inputs = [b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0'];
+        let mut idx = 0;
+        loop {
+            gui.draw_menu();
+            let input = demo_inputs[idx];
+            gui.handle_input(input);
+            idx += 1;
+            if input == b'0' || idx >= demo_inputs.len() {
+                break;
+            }
+            // Simulate delay (in real code, wait for user input)
+            for _ in 0..10_000_000 { core::hint::spin_loop(); }
+        }
     }
 
     // Example RAMDISK_MEMORY allocation (must be static and mutable)

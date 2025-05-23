@@ -8,6 +8,15 @@ pub struct FramebufferWriter {
     bpp: usize,   // bytes per pixel
 }
 
+// 8x8 ASCII font (partial, for demo; fill out as needed)
+const FONT8X8: [[u8; 8]; 128] = [
+    // Only a few characters for brevity; fill out for full ASCII
+    [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00], // 0x00 (null)
+    [0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00], // 0x01 (smiley)
+    // ...
+    [0x00; 8]; 126 // Fill out the rest as needed
+];
+
 impl FramebufferWriter {
     pub fn new(fb_addr: *mut u8, width: usize, height: usize, pitch: usize, bpp: usize) -> Self {
         FramebufferWriter {
@@ -38,6 +47,26 @@ impl FramebufferWriter {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Draw an ASCII character at (x, y) in pixels, with foreground and background color
+    pub fn draw_char(&mut self, x: usize, y: usize, c: char, fg: u32, bg: u32) {
+        let idx = c as usize;
+        if idx >= 128 { return; }
+        let bitmap = &FONT8X8[idx];
+        for (row, bits) in bitmap.iter().enumerate() {
+            for col in 0..8 {
+                let color = if (bits >> (7 - col)) & 1 == 1 { fg } else { bg };
+                self.write_pixel(x + col, y + row, color);
+            }
+        }
+    }
+
+    /// Draw a string at (x, y) in pixels, with foreground and background color
+    pub fn draw_string(&mut self, x: usize, y: usize, s: &str, fg: u32, bg: u32) {
+        for (i, c) in s.chars().enumerate() {
+            self.draw_char(x + i * 8, y, c, fg, bg);
         }
     }
 
