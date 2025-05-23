@@ -7,7 +7,7 @@ const PAGE_SIZE_U64: u64 = PAGE_SIZE as u64;
 
 fn hash_page_addr(addr: u64, num_blocks: u64) -> u64 {
     let page_num = addr / PAGE_SIZE_U64;
-    (page_num.wrapping_mul(2654435761) % num_blocks)
+    page_num.wrapping_mul(2654435761) % num_blocks
 }
 
 // Helper: Write cached data to the newly mapped page

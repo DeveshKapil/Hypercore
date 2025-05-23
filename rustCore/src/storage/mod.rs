@@ -1,4 +1,8 @@
-use super::block_devices::BlockDevice;
+pub mod block_devices;
+pub mod ramdisk;
+
+pub use block_devices::BlockDevice;
+pub use ramdisk::RamDisk;
 
 pub trait StorageBackend {
     fn read_block(&self, block_id: u64, buf: &mut [u8]) -> Result<(), ()>;

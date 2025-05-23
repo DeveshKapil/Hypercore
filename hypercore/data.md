@@ -220,7 +220,7 @@ Upon completion, the Hypercore project will deliver a modern, modular, and exten
 **In short:**
 You have a working, extensible skeleton for a hypervisor OS, with all major architectural components present and ready for refinement.
 
-### What’s behind schedule?
+### What's behind schedule?
 - Real hardware driver implementation.
 - Actual, production-grade drivers for Intel Ethernet, WiFi, and Bluetooth are not yet complete.
 - Real-world device communication (MMIO, DMA, interrupts, protocol stacks) is still at the stub/mock stage.
@@ -231,7 +231,7 @@ You have a working, extensible skeleton for a hypervisor OS, with all major arch
 - Testing on real hardware.
 - Most modules have not been validated on actual Intel 7th Gen+ systems or in production-like environments.
 
-### What’s ahead of schedule?
+### What's ahead of schedule?
 - Modular and extensible design.
 - The codebase is already highly modular, making future driver and feature integration easier.
 - Device abstraction and trait-based design are more advanced than in many early-stage OS projects.
@@ -297,3 +297,54 @@ Notes: Modular design, ready for integration with open-source drivers and protoc
 Delivery Area: Deployment and Real-World Use
 Status: In Progress
 Notes: Boots in QEMU/VM; real hardware deployment and guest OS support pending.
+
+---
+
+# Current TODOs and Stubs (Codebase Analysis)
+
+## TODO List by File
+
+### rustCore/src/shell.rs
+- **Persistence to Storage**
+  - TODO: Persist to storage in create_vm, update_vm, delete_vm, snapshot_vm
+  - Implement save_to_storage and load_from_storage in VMManager
+- **Restore VM State**
+  - TODO: Restore VM state from snapshot (real implementation) in restore_vm
+- **Input Handling**
+  - TODO: Implement reading from serial/framebuffer for real shell input in read_line (currently a stub)
+- **VM Boot/Stop Logic**
+  - TODO: Implement real VM boot logic in boot_vm
+  - TODO: Implement real VM stop logic in stop_vm
+
+### rustCore/src/graphics.rs
+- **Font Table**
+  - Fill out FONT8X8 for full ASCII support
+- **Text Rendering**
+  - Implement _print for framebuffer text output
+- **Drawing Routines**
+  - Optionally, add more drawing routines (rect, line, etc.)
+
+### rustCore/src/gui.rs
+- **Input Handling**
+  - TODO: prompt for real input in handle_input (currently uses hardcoded demo values)
+- **Exit GUI Loop**
+  - Implement actual mechanism to exit the GUI event loop
+
+### rustCore/src/lib.rs
+- **Input Loop**
+  - TODO: Add input loop to handle user interaction (currently a demo loop; real input needed)
+
+## Summary Table
+
+| File        | TODO/Stub Area         | Description/What's Missing                |
+|-------------|------------------------|-------------------------------------------|
+| shell.rs    | Persistence            | Save/load VM state to storage             |
+| shell.rs    | VM Boot/Stop           | Real logic to launch/stop VMs             |
+| shell.rs    | Input Handling         | Real shell input (keyboard/serial)        |
+| shell.rs    | Restore VM State       | Restore full VM state from snapshot       |
+| graphics.rs | Font Table             | Full ASCII bitmap font                    |
+| graphics.rs | Text Rendering         | Implement _print for framebuffer text     |
+| graphics.rs | Drawing Routines       | Rectangles, lines, etc. for GUI           |
+| gui.rs      | Input Handling         | Prompt for real user input                |
+| gui.rs      | Exit GUI Loop          | Mechanism to exit GUI event loop          |
+| lib.rs      | Input Loop             | Real event loop for GUI input             |
