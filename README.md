@@ -55,3 +55,104 @@ Check if all required packages are installed correctly by running:
 
 ---
 
+## **QEMU and Ceph Installation**
+
+### **Install QEMU and Ceph**
+Run the following commands to install QEMU (with KVM support) and Ceph:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ceph qemu qemu-kvm
+```
+
+---
+
+## **Ceph Cluster Configuration (Single Node for Development)**
+
+### **1. Prepare ceph.conf**
+Generate a UUID for your cluster:
+```bash
+uuidgen
+```
+Edit (or create) `ceph.conf` in your project root and set the `fsid` to the UUID you generated:
+
+```ini
+[global]
+fsid = <your-uuid-here>
+mon_initial_members = a
+mon_host = 127.0.0.1
+auth_cluster_required = none
+auth_service_required = none
+auth_client_required = none
+osd_journal_size = 100
+osd_pool_default_size = 1
+osd_pool_default_min_size = 1
+osd_pool_default_pg_num = 8
+osd_pool_default_pgp_num = 8
+```
+
+### **2. Prepare Directories**
+```bash
+sudo mkdir -p /var/lib/ceph/mon/ceph-a
+sudo mkdir -p /var/lib/ceph/osd/ceph-0
+```
+
+### **3. Create Keyrings and Monmap**
+```bash
+sudo ceph-authtool --create-keyring /tmp/ceph.mon.keyring --gen-key -n mon. --cap mon 'allow *'
+sudo ceph-authtool --create-keyring /tmp/ceph.client.admin.keyring --gen-key -n client.admin --cap mon 'allow *' --cap osd 'allow *' --cap mgr 'allow *'
+sudo monmaptool --create --add a 127.0.0.1 --fsid <your-uuid-here> /tmp/monmap
+```
+
+### **4. Initialize and Start the Monitor**
+```bash
+sudo ceph-mon --mkfs -i a --monmap /tmp/monmap --keyring /tmp/ceph.mon.keyring --conf /home/dev/Hypercore-1/ceph.conf
+sudo ceph-mon -i a --conf /home/dev/Hypercore-1/ceph.conf
+```
+
+### **5. Initialize and Start the OSD**
+```bash
+sudo ceph-osd -i 0 --mkfs --osd-data /var/lib/ceph/osd/ceph-0 --conf /home/dev/Hypercore-1/ceph.conf --keyring /tmp/ceph.client.admin.keyring
+sudo ceph-osd -i 0 --osd-data /var/lib/ceph/osd/ceph-0 --conf /home/dev/Hypercore-1/ceph.conf
+```
+
+### **6. Check Cluster Health**
+```bash
+ceph -c /home/dev/Hypercore-1/ceph.conf health
+```
+
+### **7. Create a Pool and RBD Image**
+```bash
+ceph -c /home/dev/Hypercore-1/ceph.conf osd pool create vm-pool 8
+rbd -c /home/dev/Hypercore-1/ceph.conf create vm-pool/ubuntu-vm --size 10240
+```
+
+---
+
+## **Running the Hypervisor**
+
+### **1. Create a VM**
+Use the CLI to create a VM, specifying the Ceph RBD image and (optionally) an Ubuntu ISO:
+
+```bash
+create-vm <name> <ram_mb> <cpus> rbd:vm-pool/ubuntu-vm:conf=/home/dev/Hypercore-1/ceph.conf /path/to/ubuntu.iso
+```
+
+Example:
+```bash
+create-vm ubuntu-vm 2048 2 rbd:vm-pool/ubuntu-vm:conf=/home/dev/Hypercore-1/ceph.conf /home/dev/Hypercore-1/ubuntu-22.04.iso
+```
+
+### **2. Boot the VM**
+```bash
+boot-vm ubuntu-vm
+```
+
+This will launch QEMU with the specified Ceph RBD image as the VM's disk.
+
+---
+
+**Note:**
+- Make sure your Ceph monitor and OSD are running before starting a VM.
+- For production or multi-node clusters, refer to the official Ceph documentation.
+
