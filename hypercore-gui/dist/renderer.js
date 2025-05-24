@@ -100218,6 +100218,7 @@ function App() {
     selectMode: 'file',
     onSelect: () => {}
   });
+  const [error, setError] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)(null);
   (0,react__WEBPACK_IMPORTED_MODULE_0__.useEffect)(() => {
     loadVMs();
   }, []);
@@ -100225,14 +100226,42 @@ function App() {
     const configs = await ipcRenderer.invoke('get-vm-configs');
     setVms(configs);
   };
+  const validateVmConfig = vm => {
+    if (!vm.name || vm.name.trim() === '') {
+      setError('VM name is required');
+      return false;
+    }
+    if (!vm.ram || vm.ram < 512) {
+      setError('RAM must be at least 512MB');
+      return false;
+    }
+    if (!vm.cpus || vm.cpus < 1) {
+      setError('At least 1 CPU is required');
+      return false;
+    }
+    return true;
+  };
   const handleCreateVM = async () => {
     try {
-      await ipcRenderer.invoke('create-vm', newVm);
-      await loadVMs();
-      setCreateDialogOpen(false);
-      setNewVm({});
-    } catch (error) {
-      console.error('Failed to create VM:', error);
+      console.log('Creating VM with config:', newVm);
+      setError(null);
+      if (!validateVmConfig(newVm)) {
+        console.log('Validation failed');
+        return;
+      }
+      console.log('Sending create-vm request to main process');
+      const result = await ipcRenderer.invoke('create-vm', newVm);
+      console.log('Received result:', result);
+      if (result.success) {
+        await loadVMs();
+        setCreateDialogOpen(false);
+        setNewVm({});
+      } else {
+        setError('Failed to create VM: ' + result.error);
+      }
+    } catch (err) {
+      console.error('Failed to create VM:', err);
+      setError('Failed to create VM: ' + (err.message || 'Unknown error'));
     }
   };
   const handleDeleteVM = async name => {
@@ -100341,36 +100370,60 @@ function App() {
   })))))))), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_19__["default"], {
     open: createDialogOpen,
     onClose: () => setCreateDialogOpen(false)
-  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_20__["default"], null, "Create New VM"), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_21__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
+  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_20__["default"], null, "Create New VM"), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_21__["default"], null, error && /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_6__["default"], {
+    color: "error",
+    sx: {
+      mb: 2
+    }
+  }, error), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
     autoFocus: true,
     margin: "dense",
     label: "VM Name",
     fullWidth: true,
+    required: true,
+    error: !newVm.name,
     value: newVm.name || '',
-    onChange: e => setNewVm({
-      ...newVm,
-      name: e.target.value
-    })
+    onChange: e => {
+      console.log('Setting VM name:', e.target.value);
+      setNewVm({
+        ...newVm,
+        name: e.target.value
+      });
+    }
   }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
     margin: "dense",
     label: "RAM (MB)",
     type: "number",
     fullWidth: true,
+    required: true,
+    error: !newVm.ram || newVm.ram < 512,
+    helperText: "Minimum 512MB",
     value: newVm.ram || '',
-    onChange: e => setNewVm({
-      ...newVm,
-      ram: parseInt(e.target.value)
-    })
+    onChange: e => {
+      const ram = parseInt(e.target.value);
+      console.log('Setting RAM:', ram);
+      setNewVm({
+        ...newVm,
+        ram
+      });
+    }
   }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
     margin: "dense",
     label: "CPUs",
     type: "number",
     fullWidth: true,
+    required: true,
+    error: !newVm.cpus || newVm.cpus < 1,
+    helperText: "Minimum 1 CPU",
     value: newVm.cpus || '',
-    onChange: e => setNewVm({
-      ...newVm,
-      cpus: parseInt(e.target.value)
-    })
+    onChange: e => {
+      const cpus = parseInt(e.target.value);
+      console.log('Setting CPUs:', cpus);
+      setNewVm({
+        ...newVm,
+        cpus
+      });
+    }
   }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
     margin: "dense",
     label: "System Disk",
@@ -100403,11 +100456,18 @@ function App() {
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_24__["default"], null)))
     }
   })), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_25__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_26__["default"], {
-    onClick: () => setCreateDialogOpen(false)
+    onClick: () => {
+      console.log('Cancel clicked');
+      setCreateDialogOpen(false);
+    }
   }, "Cancel"), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_26__["default"], {
-    onClick: handleCreateVM,
+    onClick: () => {
+      console.log('Create button clicked');
+      handleCreateVM();
+    },
     variant: "contained",
-    color: "primary"
+    color: "primary",
+    disabled: !newVm.name || !newVm.ram || !newVm.cpus
   }, "Create"))), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_components_FileDialog__WEBPACK_IMPORTED_MODULE_2__["default"], {
     open: fileDialogOpen,
     onClose: () => setFileDialogOpen(false),

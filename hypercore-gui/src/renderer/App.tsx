@@ -58,6 +58,7 @@ function App() {
     selectMode: 'file',
     onSelect: () => {},
   });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadVMs();
@@ -68,14 +69,45 @@ function App() {
     setVms(configs);
   };
 
+  const validateVmConfig = (vm: Partial<VM>): boolean => {
+    if (!vm.name || vm.name.trim() === '') {
+      setError('VM name is required');
+      return false;
+    }
+    if (!vm.ram || vm.ram < 512) {
+      setError('RAM must be at least 512MB');
+      return false;
+    }
+    if (!vm.cpus || vm.cpus < 1) {
+      setError('At least 1 CPU is required');
+      return false;
+    }
+    return true;
+  };
+
   const handleCreateVM = async () => {
     try {
-      await ipcRenderer.invoke('create-vm', newVm);
-      await loadVMs();
-      setCreateDialogOpen(false);
-      setNewVm({});
-    } catch (error) {
-      console.error('Failed to create VM:', error);
+      console.log('Creating VM with config:', newVm);
+      setError(null);
+      if (!validateVmConfig(newVm)) {
+        console.log('Validation failed');
+        return;
+      }
+
+      console.log('Sending create-vm request to main process');
+      const result = await ipcRenderer.invoke('create-vm', newVm);
+      console.log('Received result:', result);
+      
+      if (result.success) {
+        await loadVMs();
+        setCreateDialogOpen(false);
+        setNewVm({});
+      } else {
+        setError('Failed to create VM: ' + result.error);
+      }
+    } catch (err: any) {
+      console.error('Failed to create VM:', err);
+      setError('Failed to create VM: ' + (err.message || 'Unknown error'));
     }
   };
 
@@ -191,29 +223,53 @@ function App() {
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)}>
         <DialogTitle>Create New VM</DialogTitle>
         <DialogContent>
+          {error && (
+            <Typography color="error" sx={{ mb: 2 }}>
+              {error}
+            </Typography>
+          )}
           <TextField
             autoFocus
             margin="dense"
             label="VM Name"
             fullWidth
+            required
+            error={!newVm.name}
             value={newVm.name || ''}
-            onChange={(e) => setNewVm({ ...newVm, name: e.target.value })}
+            onChange={(e) => {
+              console.log('Setting VM name:', e.target.value);
+              setNewVm({ ...newVm, name: e.target.value });
+            }}
           />
           <TextField
             margin="dense"
             label="RAM (MB)"
             type="number"
             fullWidth
+            required
+            error={!newVm.ram || newVm.ram < 512}
+            helperText="Minimum 512MB"
             value={newVm.ram || ''}
-            onChange={(e) => setNewVm({ ...newVm, ram: parseInt(e.target.value) })}
+            onChange={(e) => {
+              const ram = parseInt(e.target.value);
+              console.log('Setting RAM:', ram);
+              setNewVm({ ...newVm, ram });
+            }}
           />
           <TextField
             margin="dense"
             label="CPUs"
             type="number"
             fullWidth
+            required
+            error={!newVm.cpus || newVm.cpus < 1}
+            helperText="Minimum 1 CPU"
             value={newVm.cpus || ''}
-            onChange={(e) => setNewVm({ ...newVm, cpus: parseInt(e.target.value) })}
+            onChange={(e) => {
+              const cpus = parseInt(e.target.value);
+              console.log('Setting CPUs:', cpus);
+              setNewVm({ ...newVm, cpus });
+            }}
           />
           <TextField
             margin="dense"
@@ -253,8 +309,21 @@ function App() {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateVM} variant="contained" color="primary">
+          <Button onClick={() => {
+            console.log('Cancel clicked');
+            setCreateDialogOpen(false);
+          }}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={() => {
+              console.log('Create button clicked');
+              handleCreateVM();
+            }}
+            variant="contained" 
+            color="primary"
+            disabled={!newVm.name || !newVm.ram || !newVm.cpus}
+          >
             Create
           </Button>
         </DialogActions>

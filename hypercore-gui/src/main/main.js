@@ -40,12 +40,16 @@ function createWindow() {
 
 // Helper function to execute commands
 function execCommand(command) {
+  console.log('Executing command:', command); // Debug log
   return new Promise((resolve, reject) => {
     exec(command, (error, stdout, stderr) => {
       if (error) {
+        console.error('Command failed:', error); // Debug log
+        console.error('stderr:', stderr); // Debug log
         reject(error);
         return;
       }
+      console.log('Command output:', stdout); // Debug log
       resolve(stdout.trim());
     });
   });
@@ -81,9 +85,32 @@ async function createRbdImage(vmName) {
   }
 }
 
+// Check if required commands are available
+async function checkDependencies() {
+  console.log('Checking dependencies...'); // Debug log
+  try {
+    await execCommand('which virt-install');
+    await execCommand('which qemu-system-x86_64');
+    await execCommand('which virsh');
+    await execCommand('which rbd');
+    console.log('All dependencies found'); // Debug log
+    return true;
+  } catch (error) {
+    console.error('Missing required dependencies:', error);
+    return false;
+  }
+}
+
 app.whenReady().then(async () => {
   createWindow();
-  await cephStorage.initializeCephStorage();
+  const depsOk = await checkDependencies();
+  if (!depsOk) {
+    console.error('Missing required dependencies. Please install QEMU, libvirt, and Ceph.');
+  }
+  const cephOk = await cephStorage.initializeCephStorage();
+  if (!cephOk) {
+    console.error('Failed to initialize Ceph storage.');
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -120,9 +147,26 @@ ipcMain.handle('get-vm-configs', async () => {
 });
 
 ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
+  console.log('Received create-vm request:', { name, ram, cpus, iso }); // Debug log
   try {
+    // Validate input
+    if (!name || !ram || !cpus) {
+      console.log('Missing required parameters'); // Debug log
+      throw new Error('Missing required parameters');
+    }
+
+    // Check if VM name already exists
+    console.log('Checking if VM exists...'); // Debug log
+    const existingVMs = await execCommand('virsh list --all --name');
+    if (existingVMs.split('\n').includes(name)) {
+      console.log('VM name already exists'); // Debug log
+      throw new Error('VM with this name already exists');
+    }
+
     // Create RBD images for VM
+    console.log('Creating RBD images...'); // Debug log
     const { systemDisk, dataDisk } = await cephStorage.createVmImage(name);
+    console.log('Created disks:', { systemDisk, dataDisk }); // Debug log
     
     // Create VM using the RBD images
     const command = `virt-install \
@@ -134,11 +178,14 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
       ${iso ? `--cdrom ${iso}` : '--import'} \
       --os-variant generic \
       --network bridge=virbr0 \
-      --graphics vnc`;
+      --graphics vnc \
+      --noautoconsole`;
 
+    console.log('Creating VM with command:', command); // Debug log
     await execCommand(command);
     
     // Store VM configuration
+    console.log('Storing VM configuration...'); // Debug log
     store.set(`vm.${name}`, {
       name,
       ram,
@@ -148,10 +195,25 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
       iso
     });
     
+    console.log('VM creation completed successfully'); // Debug log
     return { success: true };
   } catch (error) {
     console.error('Failed to create VM:', error);
-    throw error;
+    // Clean up any created resources on failure
+    try {
+      console.log('Cleaning up after failure...'); // Debug log
+      if (name) {
+        await execCommand(`virsh destroy ${name}`).catch(() => {});
+        await execCommand(`virsh undefine ${name}`).catch(() => {});
+        await cephStorage.deleteVmImages(name).catch(() => {});
+      }
+    } catch (cleanupError) {
+      console.error('Failed to clean up after error:', cleanupError);
+    }
+    return { 
+      success: false, 
+      error: error.message || 'Failed to create VM' 
+    };
   }
 });
 
