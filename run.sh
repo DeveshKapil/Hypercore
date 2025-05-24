@@ -20,11 +20,13 @@ ceph -c /home/dev/Hypercore-1/ceph.conf health
 echo "Launching QEMU VM..."
 qemu-system-x86_64 \
   -enable-kvm \
+  -cpu host \
   -m 4096 \
   -smp 4 \
   -drive file=rbd:vm-pool/ubuntu-vm:conf=/home/dev/Hypercore-1/ceph.conf,if=virtio,format=raw \
   -cdrom /home/dev/Downloads/ubuntu-22.04.5-desktop-amd64.iso \
   -boot d
+
 
 # Optionally, kill Ceph daemons after QEMU exits
 echo "Shutting down Ceph daemons..."
