@@ -100198,7 +100198,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _mui_icons_material__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! @mui/icons-material */ "./node_modules/@mui/icons-material/esm/ExpandMore.js");
 /* harmony import */ var _mui_icons_material__WEBPACK_IMPORTED_MODULE_24__ = __webpack_require__(/*! @mui/icons-material */ "./node_modules/@mui/icons-material/esm/FolderOpen.js");
 /* harmony import */ var _components_ResourceMonitor__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./components/ResourceMonitor */ "./src/renderer/components/ResourceMonitor.tsx");
-/* harmony import */ var _components_FileManagerDialog__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./components/FileManagerDialog */ "./src/renderer/components/FileManagerDialog.tsx");
+/* harmony import */ var _components_FileDialog__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./components/FileDialog */ "./src/renderer/components/FileDialog.tsx");
 
 
 
@@ -100212,8 +100212,12 @@ function App() {
   const [createDialogOpen, setCreateDialogOpen] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)(false);
   const [newVm, setNewVm] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)({});
   const [expandedVM, setExpandedVM] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)(null);
-  const [fileManagerOpen, setFileManagerOpen] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)(false);
-  const [fileManagerType, setFileManagerType] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)('iso');
+  const [fileDialogOpen, setFileDialogOpen] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)(false);
+  const [fileDialogConfig, setFileDialogConfig] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)({
+    title: '',
+    selectMode: 'file',
+    onSelect: () => {}
+  });
   (0,react__WEBPACK_IMPORTED_MODULE_0__.useEffect)(() => {
     loadVMs();
   }, []);
@@ -100267,22 +100271,13 @@ function App() {
   const toggleExpand = name => {
     setExpandedVM(expandedVM === name ? null : name);
   };
-  const handleBrowse = type => {
-    setFileManagerType(type);
-    setFileManagerOpen(true);
-  };
-  const handleFileSelect = path => {
-    if (fileManagerType === 'iso') {
-      setNewVm({
-        ...newVm,
-        iso: path
-      });
-    } else {
-      setNewVm({
-        ...newVm,
-        disk: path
-      });
-    }
+  const openFileDialog = (title, selectMode, onSelect) => {
+    setFileDialogConfig({
+      title,
+      selectMode,
+      onSelect
+    });
+    setFileDialogOpen(true);
   };
   return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_3__["default"], {
     sx: {
@@ -100324,10 +100319,10 @@ function App() {
   }, "RAM: ", vm.ram, "MB | CPUs: ", vm.cpus), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_6__["default"], {
     variant: "body2",
     color: "text.secondary"
-  }, "Disk: ", vm.disk), vm.cephPool && /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_6__["default"], {
+  }, "System Disk: ", vm.systemDisk), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_6__["default"], {
     variant: "body2",
     color: "text.secondary"
-  }, "Ceph Pool: ", vm.cephPool, " | Image: ", vm.cephImage)), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_3__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_7__["default"], {
+  }, "Data Disk: ", vm.dataDisk)), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_3__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_7__["default"], {
     onClick: () => handleCloneVM(name)
   }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_13__["default"], null)), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_7__["default"], {
     onClick: () => handleSnapshotVM(name)
@@ -100378,7 +100373,19 @@ function App() {
     })
   }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
     margin: "dense",
-    label: "ISO Path",
+    label: "System Disk",
+    fullWidth: true,
+    value: newVm.systemDisk || '',
+    disabled: true
+  }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
+    margin: "dense",
+    label: "Data Disk",
+    fullWidth: true,
+    value: newVm.dataDisk || '',
+    disabled: true
+  }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_22__["default"], {
+    margin: "dense",
+    label: "ISO Path (optional)",
     fullWidth: true,
     value: newVm.iso || '',
     onChange: e => setNewVm({
@@ -100389,7 +100396,10 @@ function App() {
       endAdornment: /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_23__["default"], {
         position: "end"
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_7__["default"], {
-        onClick: () => handleBrowse('iso')
+        onClick: () => openFileDialog('Select ISO File', 'file', path => setNewVm({
+          ...newVm,
+          iso: path
+        }))
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_24__["default"], null)))
     }
   })), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_25__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_26__["default"], {
@@ -100398,23 +100408,26 @@ function App() {
     onClick: handleCreateVM,
     variant: "contained",
     color: "primary"
-  }, "Create"))), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_components_FileManagerDialog__WEBPACK_IMPORTED_MODULE_2__["default"], {
-    open: fileManagerOpen,
-    onClose: () => setFileManagerOpen(false),
-    onSelect: handleFileSelect,
-    title: fileManagerType === 'iso' ? 'Select ISO File' : 'Select Storage Location',
-    fileType: fileManagerType === 'iso' ? 'file' : 'directory',
-    filter: fileManagerType === 'iso' ? ['.iso'] : []
+  }, "Create"))), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_components_FileDialog__WEBPACK_IMPORTED_MODULE_2__["default"], {
+    open: fileDialogOpen,
+    onClose: () => setFileDialogOpen(false),
+    title: fileDialogConfig.title,
+    selectMode: fileDialogConfig.selectMode,
+    onSelect: path => {
+      fileDialogConfig.onSelect(path);
+      setFileDialogOpen(false);
+    },
+    fileFilter: ['.iso']
   }));
 }
 /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (App);
 
 /***/ }),
 
-/***/ "./src/renderer/components/FileManagerDialog.tsx":
-/*!*******************************************************!*\
-  !*** ./src/renderer/components/FileManagerDialog.tsx ***!
-  \*******************************************************/
+/***/ "./src/renderer/components/FileDialog.tsx":
+/*!************************************************!*\
+  !*** ./src/renderer/components/FileDialog.tsx ***!
+  \************************************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
 "use strict";
@@ -100425,13 +100438,13 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! react */ "./node_modules/react/index.js");
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Breadcrumbs/Breadcrumbs.js");
-/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/IconButton/IconButton.js");
-/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Link/Link.js");
-/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Dialog/Dialog.js");
-/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/DialogTitle/DialogTitle.js");
-/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/DialogContent/DialogContent.js");
-/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Box/Box.js");
-/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Typography/Typography.js");
+/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Link/Link.js");
+/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Dialog/Dialog.js");
+/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/DialogTitle/DialogTitle.js");
+/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/DialogContent/DialogContent.js");
+/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/Box/Box.js");
+/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/IconButton/IconButton.js");
+/* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/TextField/TextField.js");
 /* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/List/List.js");
 /* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/ListItem/ListItem.js");
 /* harmony import */ var _mui_material__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! @mui/material */ "./node_modules/@mui/material/ListItemIcon/ListItemIcon.js");
@@ -100448,56 +100461,62 @@ __webpack_require__.r(__webpack_exports__);
 const {
   ipcRenderer
 } = window.require('electron');
-const FileManagerDialog = ({
+const FileDialog = ({
   open,
   onClose,
   onSelect,
   title,
-  fileType = 'file',
-  filter = []
+  selectMode,
+  fileFilter = []
 }) => {
   const [currentPath, setCurrentPath] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)('');
   const [items, setItems] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)([]);
-  const [error, setError] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)(null);
+  const [selectedItem, setSelectedItem] = (0,react__WEBPACK_IMPORTED_MODULE_0__.useState)('');
   (0,react__WEBPACK_IMPORTED_MODULE_0__.useEffect)(() => {
     if (open) {
-      loadDirectory('/home');
+      loadInitialPath();
     }
   }, [open]);
+  const loadInitialPath = async () => {
+    const homePath = await ipcRenderer.invoke('get-home-path');
+    setCurrentPath(homePath);
+    loadDirectory(homePath);
+  };
   const loadDirectory = async path => {
     try {
-      const result = await ipcRenderer.invoke('browse-directory', path);
-      setItems(result.items);
-      setCurrentPath(result.currentPath);
-      setError(null);
+      const contents = await ipcRenderer.invoke('read-directory', path);
+      setItems(contents);
+      setCurrentPath(path);
     } catch (error) {
-      setError('Failed to load directory');
-      console.error('Failed to load directory:', error);
+      console.error('Failed to read directory:', error);
     }
   };
   const handleNavigate = path => {
     loadDirectory(path);
+    setSelectedItem('');
   };
-  const handleUpDirectory = () => {
+  const handleItemClick = async (name, isDirectory) => {
+    const newPath = `${currentPath}/${name}`;
+    if (isDirectory) {
+      handleNavigate(newPath);
+    } else {
+      setSelectedItem(newPath);
+    }
+  };
+  const handleUpClick = () => {
     const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
-    loadDirectory(parentPath);
+    handleNavigate(parentPath);
   };
-  const handleHomeDirectory = () => {
-    loadDirectory('/home');
+  const handleHomeClick = () => {
+    loadInitialPath();
   };
-  const handleSelect = item => {
-    if (item.isDirectory) {
-      loadDirectory(item.path);
-    } else if (fileType === 'file') {
-      onSelect(item.path);
-      onClose();
-    }
-  };
-  const handleSelectDirectory = () => {
-    if (fileType === 'directory') {
+  const handleSelect = () => {
+    if (selectMode === 'directory') {
       onSelect(currentPath);
-      onClose();
+    } else {
+      onSelect(selectedItem);
     }
+    onClose();
   };
   const getBreadcrumbs = () => {
     const paths = currentPath.split('/').filter(Boolean);
@@ -100506,61 +100525,63 @@ const FileManagerDialog = ({
         mb: 2
       }
     }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_2__["default"], {
-      onClick: handleHomeDirectory,
-      size: "small"
-    }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_3__["default"], null)), paths.map((path, index) => {
-      const fullPath = '/' + paths.slice(0, index + 1).join('/');
-      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_4__["default"], {
-        key: fullPath,
-        component: "button",
-        variant: "body1",
-        onClick: () => handleNavigate(fullPath),
-        sx: {
-          cursor: 'pointer'
-        }
-      }, path);
-    }));
+      component: "button",
+      variant: "body1",
+      onClick: handleHomeClick,
+      sx: {
+        display: 'flex',
+        alignItems: 'center'
+      }
+    }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_3__["default"], {
+      sx: {
+        mr: 0.5
+      },
+      fontSize: "small"
+    }), "Home"), paths.map((path, index) => /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_2__["default"], {
+      key: index,
+      component: "button",
+      variant: "body1",
+      onClick: () => handleNavigate(`/${paths.slice(0, index + 1).join('/')}`)
+    }, path)));
   };
-  return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_5__["default"], {
+  return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_4__["default"], {
     open: open,
     onClose: onClose,
     maxWidth: "md",
     fullWidth: true
-  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_6__["default"], null, title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_7__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_8__["default"], {
+  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_5__["default"], null, title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_6__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_7__["default"], {
     sx: {
       display: 'flex',
       alignItems: 'center',
       mb: 2
     }
-  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_2__["default"], {
-    onClick: handleUpDirectory
-  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_9__["default"], null)), getBreadcrumbs()), error && /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_10__["default"], {
-    color: "error",
+  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_8__["default"], {
+    onClick: handleUpClick
+  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_9__["default"], null)), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_8__["default"], {
+    onClick: handleHomeClick
+  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_3__["default"], null)), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_10__["default"], {
+    fullWidth: true,
+    value: currentPath,
+    onChange: e => handleNavigate(e.target.value),
     sx: {
-      mb: 2
+      ml: 1
     }
-  }, error), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_11__["default"], null, items.map(item => /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_12__["default"], {
-    key: item.path,
+  })), getBreadcrumbs(), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_11__["default"], null, items.map(item => /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_12__["default"], {
     button: true,
-    onClick: () => handleSelect(item),
-    sx: {
-      display: 'flex',
-      alignItems: 'center',
-      '&:hover': {
-        backgroundColor: 'action.hover'
-      }
-    }
+    key: item.name,
+    onClick: () => handleItemClick(item.name, item.isDirectory),
+    selected: `${currentPath}/${item.name}` === selectedItem
   }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_13__["default"], null, item.isDirectory ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_14__["default"], null) : /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_icons_material__WEBPACK_IMPORTED_MODULE_15__["default"], null)), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_16__["default"], {
     primary: item.name
   }))))), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_17__["default"], null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_18__["default"], {
     onClick: onClose
-  }, "Cancel"), fileType === 'directory' && /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_18__["default"], {
-    onClick: handleSelectDirectory,
+  }, "Cancel"), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_mui_material__WEBPACK_IMPORTED_MODULE_18__["default"], {
+    onClick: handleSelect,
     variant: "contained",
-    color: "primary"
-  }, "Select Directory")));
+    disabled: selectMode === 'file' && !selectedItem
+  }, "Select")));
 };
-/* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (FileManagerDialog);
+/* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (FileDialog);
 
 /***/ }),
 

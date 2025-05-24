@@ -17,6 +17,7 @@ import {
   TextField,
   IconButton,
   Collapse,
+  InputAdornment,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -26,8 +27,10 @@ import {
   Restore as RestoreIcon,
   Settings as SettingsIcon,
   ExpandMore as ExpandMoreIcon,
+  FolderOpen as FolderIcon,
 } from '@mui/icons-material';
 import ResourceMonitor from './components/ResourceMonitor';
+import FileDialog from './components/FileDialog';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -35,7 +38,8 @@ interface VM {
   name: string;
   ram: number;
   cpus: number;
-  disk: string;
+  systemDisk: string;
+  dataDisk: string;
   iso?: string;
 }
 
@@ -44,6 +48,16 @@ function App() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newVm, setNewVm] = useState<Partial<VM>>({});
   const [expandedVM, setExpandedVM] = useState<string | null>(null);
+  const [fileDialogOpen, setFileDialogOpen] = useState(false);
+  const [fileDialogConfig, setFileDialogConfig] = useState<{
+    title: string;
+    selectMode: 'file' | 'directory';
+    onSelect: (path: string) => void;
+  }>({
+    title: '',
+    selectMode: 'file',
+    onSelect: () => {},
+  });
 
   useEffect(() => {
     loadVMs();
@@ -97,6 +111,15 @@ function App() {
     setExpandedVM(expandedVM === name ? null : name);
   };
 
+  const openFileDialog = (
+    title: string,
+    selectMode: 'file' | 'directory',
+    onSelect: (path: string) => void
+  ) => {
+    setFileDialogConfig({ title, selectMode, onSelect });
+    setFileDialogOpen(true);
+  };
+
   return (
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
@@ -123,7 +146,10 @@ function App() {
                         RAM: {vm.ram}MB | CPUs: {vm.cpus}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Disk: {vm.disk}
+                        System Disk: {vm.systemDisk}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Data Disk: {vm.dataDisk}
                       </Typography>
                     </Box>
                     <Box>
@@ -191,10 +217,17 @@ function App() {
           />
           <TextField
             margin="dense"
-            label="Disk Path"
+            label="System Disk"
             fullWidth
-            value={newVm.disk || ''}
-            onChange={(e) => setNewVm({ ...newVm, disk: e.target.value })}
+            value={newVm.systemDisk || ''}
+            disabled
+          />
+          <TextField
+            margin="dense"
+            label="Data Disk"
+            fullWidth
+            value={newVm.dataDisk || ''}
+            disabled
           />
           <TextField
             margin="dense"
@@ -202,6 +235,21 @@ function App() {
             fullWidth
             value={newVm.iso || ''}
             onChange={(e) => setNewVm({ ...newVm, iso: e.target.value })}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() =>
+                      openFileDialog('Select ISO File', 'file', (path) =>
+                        setNewVm({ ...newVm, iso: path })
+                      )
+                    }
+                  >
+                    <FolderIcon />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
           />
         </DialogContent>
         <DialogActions>
@@ -211,6 +259,18 @@ function App() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <FileDialog
+        open={fileDialogOpen}
+        onClose={() => setFileDialogOpen(false)}
+        title={fileDialogConfig.title}
+        selectMode={fileDialogConfig.selectMode}
+        onSelect={(path) => {
+          fileDialogConfig.onSelect(path);
+          setFileDialogOpen(false);
+        }}
+        fileFilter={['.iso']}
+      />
     </Box>
   );
 }
