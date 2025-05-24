@@ -21,5 +21,13 @@ io manamgement system
 
 network manamgement
 
-uefi = "0.25"
-uefi-services = "0.22"
+
+Create a gui using electron js to doe the following tasks
+on a vm created using qemu
+create a vm
+clone a vm
+delete a vm
+snapshot a vm
+update a vm
+store vm configs
+restore vm
