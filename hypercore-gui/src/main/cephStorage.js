@@ -10,7 +10,17 @@ const sharedStorage = require('./sharedStorage');
 const STORAGE_CONFIG = {
   baseDir: path.join(os.homedir(), '.hypercore', 'vms'),
   defaultSizes: {
-    disk: 20 // GB
+    disk: 20, // GB
+    ram: 2048, // MB
+    cpus: 2
+  },
+  defaultConfig: {
+    bootOrder: 'c', // 'c' for HDD, 'd' for CD-ROM
+    vgaType: 'qxl',
+    networkModel: 'virtio',
+    diskCache: 'none',
+    diskAio: 'native',
+    diskInterface: 'virtio'
   }
 };
 
@@ -35,7 +45,7 @@ async function createVmImage(vmName, size = STORAGE_CONFIG.defaultSizes.disk) {
 
     const diskImage = path.join(vmDir, 'disk.qcow2');
 
-    // Create disk image using qemu-img
+    // Create disk image using qemu-img with specified size
     await execPromise(`qemu-img create -f qcow2 "${diskImage}" ${size}G`);
 
     // Create mount script for shared storage
@@ -148,8 +158,6 @@ async function startVm(vmName, config) {
     const vmDir = path.join(STORAGE_CONFIG.baseDir, vmName);
     const diskImage = path.join(vmDir, 'disk.qcow2');
     const logFile = path.join(vmDir, 'qemu.log');
-    
-    // Create spice socket for clipboard sharing
     const spiceSocket = path.join(vmDir, 'spice.sock');
     
     // Ensure the VM directory exists
@@ -164,6 +172,7 @@ async function startVm(vmName, config) {
       throw new Error(`Disk image not found: ${diskImage}`);
     }
 
+    // Verify ISO if specified
     if (config.iso) {
       try {
         await fs.access(config.iso);
@@ -181,19 +190,19 @@ async function startVm(vmName, config) {
     } catch (error) {
       console.log('Cleanup of old files failed:', error);
     }
-    
+
     // Build QEMU command with optimizations
     const qemuCmd = [
       'qemu-system-x86_64',
       '-enable-kvm',
-      `-m ${config.ram}`,
+      `-m ${config.ram || STORAGE_CONFIG.defaultSizes.ram}`,
       '-cpu host',
-      `-smp ${config.cpus}`,
-      `-drive file="${diskImage}",format=qcow2,if=virtio,cache=none,aio=native,cache.direct=on`,
+      `-smp ${config.cpus || STORAGE_CONFIG.defaultSizes.cpus}`,
+      `-drive file="${diskImage}",format=qcow2,if=${STORAGE_CONFIG.defaultConfig.diskInterface},cache=${STORAGE_CONFIG.defaultConfig.diskCache},aio=${STORAGE_CONFIG.defaultConfig.diskAio},cache.direct=on`,
       config.iso ? `-cdrom "${config.iso}"` : '',
-      config.iso ? '-boot d' : '',
-      '-net nic,model=virtio -net user',
-      '-vga qxl',  // Use SPICE-compatible video
+      `-boot order=${config.iso ? 'd' : 'c'}`, // Boot from CD if ISO present, otherwise from HDD
+      `-net nic,model=${STORAGE_CONFIG.defaultConfig.networkModel} -net user`,
+      `-vga ${STORAGE_CONFIG.defaultConfig.vgaType}`,
       '-device virtio-tablet-pci',  // Better mouse integration
       '-device virtio-keyboard-pci',  // Better keyboard integration
       '-device virtio-balloon-pci',  // Memory ballooning
@@ -297,28 +306,59 @@ async function startVm(vmName, config) {
 // Stop VM gracefully
 async function stopVm(pid) {
   try {
-    // Try graceful shutdown first
-    process.kill(pid, 'SIGTERM');
+    // First try QEMU monitor command for graceful shutdown
+    const processInfo = await execPromise(`ps -o ppid= -p ${pid}`);
+    const parentPid = processInfo.trim();
     
-    // Wait for process to end
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        clearInterval(checkInterval);
-        reject(new Error('Shutdown timeout'));
-      }, 30000);
+    // Get VM name from process
+    const cmdlineInfo = await execPromise(`ps -p ${pid} -o args=`);
+    const vmNameMatch = cmdlineInfo.match(/name=([^\s]+)/);
+    const vmName = vmNameMatch ? vmNameMatch[1] : null;
 
-      const checkInterval = setInterval(() => {
-        try {
-          process.kill(pid, 0); // Check if process exists
-        } catch (e) {
-          clearTimeout(timeout);
-          clearInterval(checkInterval);
-          resolve();
+    if (vmName) {
+      const vmDir = path.join(STORAGE_CONFIG.baseDir, vmName);
+      const monitorSocket = path.join(vmDir, 'monitor.sock');
+
+      try {
+        // Try graceful shutdown through QEMU monitor
+        await execPromise(`echo "system_powerdown" | socat - UNIX-CONNECT:${monitorSocket}`);
+        
+        // Wait for up to 30 seconds for the VM to shutdown
+        for (let i = 0; i < 30; i++) {
+          try {
+            process.kill(pid, 0); // Check if process exists
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (e) {
+            // Process no longer exists
+            return true;
+          }
         }
-      }, 500);
-    });
+      } catch (monitorError) {
+        console.error('Monitor command failed:', monitorError);
+      }
+    }
 
-    return true;
+    // If graceful shutdown didn't work, try SIGTERM
+    console.log('Sending SIGTERM to process group...');
+    process.kill(-pid, 'SIGTERM');
+    
+    // Wait for up to 10 seconds for SIGTERM to work
+    for (let i = 0; i < 10; i++) {
+      try {
+        process.kill(pid, 0);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (e) {
+        return true;
+      }
+    }
+
+    // If process still exists, force kill it
+    try {
+      process.kill(pid, 0);
+      return await forceKillVm(pid);
+    } catch (e) {
+      return true; // Process is already gone
+    }
   } catch (error) {
     console.error('Failed to stop VM:', error);
     throw error;
@@ -328,14 +368,36 @@ async function stopVm(pid) {
 // Force kill VM
 async function forceKillVm(pid) {
   try {
-    // Send SIGKILL to the process group to ensure all related processes are terminated
-    process.kill(-pid, 'SIGKILL');
-    return true;
-  } catch (error) {
-    // If process is already gone, consider it a success
-    if (error.code === 'ESRCH') {
-      return true;
+    // Get process group information
+    const processInfo = await execPromise(`ps -o pid,ppid,pgid,cmd -g $(ps -o pgid= -p ${pid})`);
+    console.log('Process group info:', processInfo);
+
+    // Kill the entire process group with SIGKILL
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch (e) {
+      console.error('Failed to kill process group:', e);
     }
+
+    // Directly kill the process and its children
+    await execPromise(`pkill -KILL -P ${pid}`).catch(() => {});
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (e) {
+      // Process might already be dead
+    }
+
+    // Verify process is gone
+    try {
+      process.kill(pid, 0);
+      throw new Error('Process still exists after force kill');
+    } catch (e) {
+      if (e.code === 'ESRCH') {
+        return true; // Process is gone
+      }
+      throw e;
+    }
+  } catch (error) {
     console.error('Failed to force kill VM:', error);
     throw error;
   }
@@ -395,11 +457,30 @@ async function detachIso(vmName) {
       throw new Error('VM monitor socket not found. Is the VM running?');
     }
 
-    // Use socat to send command to QEMU monitor
-    const cmd = `echo "eject -f ide1-cd0" | socat - UNIX-CONNECT:${monitorSocket}`;
-    await execPromise(cmd);
+    // First try to gracefully eject the CD-ROM
+    try {
+      await execPromise(`echo "eject -f ide1-cd0" | socat - UNIX-CONNECT:${monitorSocket}`);
+      console.log('CD-ROM ejected successfully');
+    } catch (ejectError) {
+      console.error('Failed to eject CD-ROM:', ejectError);
+      // Try alternative method - change media to none
+      try {
+        await execPromise(`echo "change ide1-cd0 none" | socat - UNIX-CONNECT:${monitorSocket}`);
+        console.log('CD-ROM media changed to none');
+      } catch (changeError) {
+        throw new Error(`Failed to detach ISO: ${changeError.message}`);
+      }
+    }
+
+    // Change boot order to HDD
+    try {
+      await execPromise(`echo "boot_set c" | socat - UNIX-CONNECT:${monitorSocket}`);
+      console.log('Boot order changed to HDD');
+    } catch (bootError) {
+      console.error('Failed to change boot order:', bootError);
+      // Non-critical error, don't throw
+    }
     
-    console.log('ISO detached successfully');
     return true;
   } catch (error) {
     console.error('Failed to detach ISO:', error);

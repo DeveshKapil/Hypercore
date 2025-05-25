@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const Store = require('electron-store');
@@ -6,6 +6,7 @@ const osu = require('node-os-utils');
 const fs = require('fs').promises;
 const os = require('os');
 const storage = require('./cephStorage');
+const { STORAGE_CONFIG } = require('./cephStorage');
 
 const store = new Store();
 const cpu = osu.cpu;
@@ -39,6 +40,94 @@ function createWindow() {
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
   }
+
+  // Handle window close event
+  mainWindow.on('close', async (e) => {
+    e.preventDefault(); // Prevent the window from closing immediately
+    
+    try {
+      // Get all running VMs
+      const configs = store.get('vm') || {};
+      const runningVMs = Object.entries(configs).filter(([name, config]) => vmPids.has(name));
+      
+      if (runningVMs.length > 0) {
+        // Show confirmation dialog
+        const { response } = await dialog.showMessageBox(mainWindow, {
+          type: 'question',
+          buttons: ['Cancel', 'Force Kill', 'Save State & Shutdown'],
+          defaultId: 2,
+          title: 'Confirm Exit',
+          message: `There are ${runningVMs.length} VMs still running. How would you like to proceed?`,
+          detail: 'Save State & Shutdown will save the current state of all VMs before shutting them down.\nForce Kill will terminate them immediately without saving.\nCancel will keep the application running.'
+        });
+
+        if (response === 0) { // Cancel
+          return;
+        }
+
+        const isForceKill = response === 1;
+        
+        // Show progress in terminal output
+        for (const [name] of runningVMs) {
+          try {
+            if (isForceKill) {
+              await storage.forceKillVm(vmPids.get(name));
+              console.log(`Force killed VM: ${name}`);
+            } else {
+              // Create a snapshot before stopping
+              const snapshotName = `shutdown-state-${Date.now()}`;
+              console.log(`Saving state for VM ${name}...`);
+              
+              try {
+                // Send QEMU monitor command to stop CPU before snapshot
+                const vmDir = path.join(STORAGE_CONFIG.baseDir, name);
+                const monitorSocket = path.join(vmDir, 'monitor.sock');
+                await execPromise(`echo "stop" | socat - UNIX-CONNECT:${monitorSocket}`);
+                
+                // Create snapshot
+                await storage.createVmSnapshot(name, snapshotName);
+                console.log(`State saved for VM ${name} as snapshot: ${snapshotName}`);
+                
+                // Store the snapshot name for auto-restore
+                store.set(`vm.${name}.lastShutdownSnapshot`, snapshotName);
+                
+                // Now stop the VM
+                await storage.stopVm(vmPids.get(name));
+                console.log(`Gracefully stopped VM: ${name}`);
+              } catch (snapshotError) {
+                console.error(`Failed to save state for VM ${name}:`, snapshotError);
+                // If snapshot fails, try normal shutdown
+                await storage.stopVm(vmPids.get(name));
+                console.log(`Gracefully stopped VM ${name} (without state save)`);
+              }
+            }
+            vmPids.delete(name);
+            store.set(`vm.${name}.state`, 'stopped');
+          } catch (error) {
+            console.error(`Failed to stop VM ${name}:`, error);
+            // If graceful shutdown fails, try force kill
+            if (!isForceKill) {
+              try {
+                await storage.forceKillVm(vmPids.get(name));
+                console.log(`Force killed VM after failed graceful shutdown: ${name}`);
+                vmPids.delete(name);
+                store.set(`vm.${name}.state`, 'stopped');
+              } catch (killError) {
+                console.error(`Failed to force kill VM ${name}:`, killError);
+              }
+            }
+          }
+        }
+      }
+      
+      // Cleanup and quit
+      app.quit();
+    } catch (error) {
+      console.error('Error during shutdown:', error);
+      dialog.showErrorBox('Error', `Failed to properly shut down: ${error.message}`);
+      app.exit(1); // Force quit with error code
+    }
+  });
 }
 
 // Helper function to execute commands and forward output
@@ -155,10 +244,10 @@ ipcMain.handle('get-vm-configs', async () => {
   return store.get('vm') || {};
 });
 
-ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
+ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso, storageSize }) => {
   try {
     // Validate input
-    if (!name || !ram || !cpus) {
+    if (!name || !ram || !cpus || !storageSize) {
       throw new Error('Missing required parameters');
     }
 
@@ -168,7 +257,7 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
     }
 
     // Create disk image for VM
-    const { diskImage } = await storage.createVmImage(name);
+    const { diskImage } = await storage.createVmImage(name, storageSize);
     event.sender.send('terminal-output', `Created disk: ${diskImage}`);
     
     // Create mount/unmount scripts
@@ -182,6 +271,7 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
       cpus,
       diskImage,
       iso,
+      storageSize,
       state: 'stopped',
       selected: false,
       sharedStorageAttached: false
@@ -236,32 +326,63 @@ ipcMain.handle('start-vm', async (event, { name }) => {
       throw new Error('VM not found');
     }
 
-    // Double check if VM is already running
-    const currentState = await storage.getVmStatus(name);
-    if (currentState === 'running') {
+    event.sender.send('terminal-output', `Starting VM ${name}...`);
+
+    // Check if VM is already running
+    if (vmPids.has(name)) {
       throw new Error('VM is already running');
     }
 
-    event.sender.send('terminal-output', `Starting VM ${name}...`);
-    const pid = await storage.startVm(name, config);
-    
-    // Verify VM actually started
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const newState = await storage.getVmStatus(name);
-    
-    if (newState !== 'running') {
-      throw new Error('Failed to start VM - process did not start properly');
+    // Check for saved shutdown state
+    const lastShutdownSnapshot = config.lastShutdownSnapshot;
+    if (lastShutdownSnapshot) {
+      try {
+        event.sender.send('terminal-output', `Restoring saved state from snapshot: ${lastShutdownSnapshot}`);
+        await storage.restoreVmSnapshot(name, lastShutdownSnapshot);
+        // Clear the snapshot reference after successful restore
+        store.delete(`vm.${name}.lastShutdownSnapshot`);
+      } catch (restoreError) {
+        event.sender.send('terminal-output', `Failed to restore state: ${restoreError.message}`);
+        event.sender.send('terminal-output', 'Proceeding with normal startup...');
+      }
     }
-    
+
+    // Handle ISO and boot order
+    let bootConfig = { ...config };
+    if (config.hasBooted && config.iso) {
+      // If VM has booted before and ISO is still attached, detach it
+      event.sender.send('terminal-output', 'VM has booted before, detaching ISO...');
+      try {
+        await storage.detachIso(name);
+        store.set(`vm.${name}.iso`, null);
+        bootConfig.iso = null;
+        event.sender.send('terminal-output', 'ISO detached successfully');
+      } catch (detachError) {
+        event.sender.send('terminal-output', `Warning: Failed to detach ISO: ${detachError.message}`);
+      }
+      bootConfig.bootOrder = 'c'; // Boot from disk
+    } else if (!config.hasBooted && config.iso) {
+      // First boot with ISO
+      bootConfig.bootOrder = 'd'; // Boot from CD
+    } else {
+      // Normal boot from disk
+      bootConfig.bootOrder = 'c';
+    }
+
+    // Start the VM
+    const pid = await storage.startVm(name, bootConfig);
+
+    // Update VM state
     vmPids.set(name, pid);
     store.set(`vm.${name}.state`, 'running');
-    
+    if (!config.hasBooted) {
+      store.set(`vm.${name}.hasBooted`, true);
+    }
+
     event.sender.send('terminal-output', 'VM started successfully');
     return { success: true };
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
-    // Ensure state is correctly set even on failure
-    store.set(`vm.${name}.state`, 'stopped');
     throw error;
   }
 });
@@ -285,26 +406,39 @@ ipcMain.handle('stop-vm', async (event, { name }) => {
     }
 
     event.sender.send('terminal-output', `Stopping VM ${name}...`);
-    await storage.stopVm(pid);
     
-    // Verify VM actually stopped
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const newState = await storage.getVmStatus(name);
-    
-    if (newState === 'running') {
-      throw new Error('Failed to stop VM - process is still running');
+    try {
+      await storage.stopVm(pid);
+      
+      // Double check process is actually gone
+      try {
+        process.kill(pid, 0);
+        throw new Error('Process still running after stop attempt');
+      } catch (e) {
+        if (e.code !== 'ESRCH') {
+          throw e;
+        }
+        // Process is gone, clean up
+        vmPids.delete(name);
+        store.set(`vm.${name}.state`, 'stopped');
+        
+        // Reset shared storage state
+        if (config.sharedStorageAttached) {
+          store.set(`vm.${name}.sharedStorageAttached`, false);
+        }
+        
+        event.sender.send('terminal-output', 'VM stopped successfully');
+        return { success: true };
+      }
+    } catch (stopError) {
+      // If stop fails, try force kill
+      event.sender.send('terminal-output', `Graceful stop failed, attempting force kill: ${stopError.message}`);
+      await storage.forceKillVm(pid);
+      vmPids.delete(name);
+      store.set(`vm.${name}.state`, 'stopped');
+      event.sender.send('terminal-output', 'VM force killed after failed stop');
+      return { success: true };
     }
-    
-    vmPids.delete(name);
-    store.set(`vm.${name}.state`, 'stopped');
-    
-    // Reset shared storage state
-    if (config.sharedStorageAttached) {
-      store.set(`vm.${name}.sharedStorageAttached`, false);
-    }
-    
-    event.sender.send('terminal-output', 'VM stopped successfully');
-    return { success: true };
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
     throw error;
@@ -453,12 +587,31 @@ ipcMain.handle('force-kill-vm', async (event, { name }) => {
     }
 
     event.sender.send('terminal-output', `Force killing VM ${name}...`);
-    await storage.forceKillVm(vmPids.get(name));
-    vmPids.delete(name);
-    store.set(`vm.${name}.state`, 'stopped');
     
-    event.sender.send('terminal-output', 'VM force killed successfully');
-    return { success: true };
+    const pid = vmPids.get(name);
+    await storage.forceKillVm(pid);
+    
+    // Verify process is actually gone
+    try {
+      process.kill(pid, 0);
+      throw new Error('Process still exists after force kill');
+    } catch (e) {
+      if (e.code !== 'ESRCH') {
+        throw e;
+      }
+      // Process is gone, clean up
+      vmPids.delete(name);
+      store.set(`vm.${name}.state`, 'stopped');
+      
+      // Reset shared storage state
+      const config = store.get(`vm.${name}`);
+      if (config && config.sharedStorageAttached) {
+        store.set(`vm.${name}.sharedStorageAttached`, false);
+      }
+      
+      event.sender.send('terminal-output', 'VM force killed successfully');
+      return { success: true };
+    }
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
     throw error;
@@ -647,6 +800,49 @@ ipcMain.handle('check-vm-states', async () => {
     return states;
   } catch (error) {
     console.error('Failed to check VM states:', error);
+    throw error;
+  }
+});
+
+// Handle ISO detachment
+ipcMain.handle('detach-iso', async (event, { name }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    event.sender.send('terminal-output', `Detaching ISO from VM ${name}...`);
+
+    // Detach ISO using QEMU monitor
+    await storage.detachIso(name);
+
+    // Update VM configuration
+    store.set(`vm.${name}.iso`, null);
+    
+    event.sender.send('terminal-output', 'ISO detached successfully');
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
+    throw error;
+  }
+});
+
+// Handle boot order changes
+ipcMain.handle('set-boot-order', async (event, { name, bootOrder }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    // Update VM configuration
+    store.set(`vm.${name}.bootOrder`, bootOrder);
+    
+    event.sender.send('terminal-output', `Updated boot order for VM ${name}`);
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
     throw error;
   }
 });

@@ -37,11 +37,13 @@ import {
   Storage as StorageIcon,
   Close as CloseIcon,
   PowerOff as KillIcon,
+  Eject as EjectIcon,
 } from '@mui/icons-material';
 import { MenuIconButton, MenuContainer } from './components/StyledMenu';
 import ResourceMonitor from './components/ResourceMonitor';
 import FileDialog from './components/FileDialog';
 import { IpcRendererEvent } from 'electron';
+import path from 'path';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -53,7 +55,10 @@ interface VM {
   dataDisk: string;
   iso?: string;
   state: string;
+  hasBooted?: boolean;
+  bootOrder?: string;
   sharedStorageAttached: boolean;
+  storageSize?: number;
 }
 
 function App() {
@@ -129,6 +134,10 @@ function App() {
     }
     if (!vm.cpus || vm.cpus < 1) {
       setError('At least 1 CPU is required');
+      return false;
+    }
+    if (!vm.storageSize || vm.storageSize < 10) {
+      setError('Storage size must be at least 10GB');
       return false;
     }
     return true;
@@ -299,6 +308,16 @@ function App() {
     setSelectedVM(name);
     setVmSettings(vms[name]);
     setSettingsDialogOpen(true);
+  };
+
+  const handleDetachIso = async (vmName: string) => {
+    try {
+      await ipcRenderer.invoke('detach-iso', { name: vmName });
+      // Refresh VM list
+      loadVMs();
+    } catch (error) {
+      console.error('Failed to detach ISO:', error);
+    }
   };
 
   return (
@@ -533,6 +552,21 @@ function App() {
               const cpus = parseInt(e.target.value);
               console.log('Setting CPUs:', cpus);
               setNewVm({ ...newVm, cpus });
+            }}
+          />
+          <TextField
+            margin="dense"
+            label="Storage Size (GB)"
+            type="number"
+            fullWidth
+            required
+            error={!newVm.storageSize || newVm.storageSize < 10}
+            helperText="Minimum 10GB recommended"
+            value={newVm.storageSize || ''}
+            onChange={(e) => {
+              const storageSize = parseInt(e.target.value);
+              console.log('Setting storage size:', storageSize);
+              setNewVm({ ...newVm, storageSize });
             }}
           />
           <TextField
