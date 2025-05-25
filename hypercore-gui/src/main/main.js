@@ -5,7 +5,7 @@ const Store = require('electron-store');
 const osu = require('node-os-utils');
 const fs = require('fs').promises;
 const os = require('os');
-const cephStorage = require('./cephStorage');
+const storage = require('./cephStorage');
 
 const store = new Store();
 const cpu = osu.cpu;
@@ -16,9 +16,12 @@ const drive = osu.drive;
 const vmPids = new Map();
 
 // Ceph configuration
-const CEPH_CONF_PATH = '/home/dev/Documents/Hypercore/ceph.conf';
+const CEPH_CONF_PATH = '/etc/ceph/ceph.conf';
 const CEPH_POOL_NAME = 'vm-pool';
 const DEFAULT_VM_SIZE_GB = 10;
+
+// Selected VMs for clipboard sharing
+const selectedVMs = new Set();
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -38,20 +41,27 @@ function createWindow() {
   }
 }
 
-// Helper function to execute commands
-function execCommand(command) {
-  console.log('Executing command:', command); // Debug log
+// Helper function to execute commands and forward output
+async function execCommandWithOutput(command, event = null) {
   return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
+    const childProcess = exec(command, (error, stdout, stderr) => {
       if (error) {
-        console.error('Command failed:', error); // Debug log
-        console.error('stderr:', stderr); // Debug log
         reject(error);
         return;
       }
-      console.log('Command output:', stdout); // Debug log
-      resolve(stdout.trim());
+      resolve(stdout);
     });
+
+    // Forward output in real-time if event is provided
+    if (event) {
+      childProcess.stdout.on('data', (data) => {
+        event.sender.send('terminal-output', data.toString());
+      });
+
+      childProcess.stderr.on('data', (data) => {
+        event.sender.send('terminal-output', data.toString());
+      });
+    }
   });
 }
 
@@ -59,10 +69,10 @@ function execCommand(command) {
 async function initializeCephStorage() {
   try {
     // Check if pool exists
-    const pools = await execCommand(`ceph -c ${CEPH_CONF_PATH} osd pool ls`);
+    const pools = await execCommandWithOutput(`ceph -c ${CEPH_CONF_PATH} osd pool ls`, null);
     if (!pools.includes(CEPH_POOL_NAME)) {
       // Create pool if it doesn't exist
-      await execCommand(`ceph -c ${CEPH_CONF_PATH} osd pool create ${CEPH_POOL_NAME} 8`);
+      await execCommandWithOutput(`ceph -c ${CEPH_CONF_PATH} osd pool create ${CEPH_POOL_NAME} 8`, null);
     }
     return true;
   } catch (error) {
@@ -75,8 +85,9 @@ async function initializeCephStorage() {
 async function createRbdImage(vmName) {
   const imageName = `${vmName}-disk`;
   try {
-    await execCommand(
-      `rbd -c ${CEPH_CONF_PATH} create ${CEPH_POOL_NAME}/${imageName} --size ${DEFAULT_VM_SIZE_GB}G`
+    await execCommandWithOutput(
+      `rbd -c ${CEPH_CONF_PATH} create ${CEPH_POOL_NAME}/${imageName} --size ${DEFAULT_VM_SIZE_GB}G`,
+      null
     );
     return `rbd:${CEPH_POOL_NAME}/${imageName}:conf=${CEPH_CONF_PATH}`;
   } catch (error) {
@@ -89,10 +100,8 @@ async function createRbdImage(vmName) {
 async function checkDependencies() {
   console.log('Checking dependencies...'); // Debug log
   try {
-    await execCommand('which virt-install');
-    await execCommand('which qemu-system-x86_64');
-    await execCommand('which virsh');
-    await execCommand('which rbd');
+    await execCommandWithOutput('which qemu-system-x86_64');
+    await execCommandWithOutput('which qemu-img');
     console.log('All dependencies found'); // Debug log
     return true;
   } catch (error) {
@@ -105,11 +114,11 @@ app.whenReady().then(async () => {
   createWindow();
   const depsOk = await checkDependencies();
   if (!depsOk) {
-    console.error('Missing required dependencies. Please install QEMU, libvirt, and Ceph.');
+    console.error('Missing required dependencies. Please install QEMU.');
   }
-  const cephOk = await cephStorage.initializeCephStorage();
-  if (!cephOk) {
-    console.error('Failed to initialize Ceph storage.');
+  const storageOk = await storage.initializeStorage();
+  if (!storageOk) {
+    console.error('Failed to initialize storage.');
   }
 });
 
@@ -147,68 +156,71 @@ ipcMain.handle('get-vm-configs', async () => {
 });
 
 ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
-  console.log('Received create-vm request:', { name, ram, cpus, iso }); // Debug log
   try {
     // Validate input
     if (!name || !ram || !cpus) {
-      console.log('Missing required parameters'); // Debug log
       throw new Error('Missing required parameters');
     }
 
     // Check if VM name already exists
-    console.log('Checking if VM exists...'); // Debug log
-    const existingVMs = await execCommand('virsh list --all --name');
-    if (existingVMs.split('\n').includes(name)) {
-      console.log('VM name already exists'); // Debug log
+    if (store.get(`vm.${name}`)) {
       throw new Error('VM with this name already exists');
     }
 
-    // Create RBD images for VM
-    console.log('Creating RBD images...'); // Debug log
-    const { systemDisk, dataDisk } = await cephStorage.createVmImage(name);
-    console.log('Created disks:', { systemDisk, dataDisk }); // Debug log
+    // Create disk image for VM
+    const { diskImage } = await storage.createVmImage(name);
+    event.sender.send('terminal-output', `Created disk: ${diskImage}`);
     
-    // Create VM using the RBD images
-    const command = `virt-install \
-      --name ${name} \
-      --ram ${ram} \
-      --vcpus ${cpus} \
-      --disk path=${systemDisk},format=raw,bus=virtio \
-      --disk path=${dataDisk},format=raw,bus=virtio \
-      ${iso ? `--cdrom ${iso}` : '--import'} \
-      --os-variant generic \
-      --network bridge=virbr0 \
-      --graphics vnc \
-      --noautoconsole`;
-
-    console.log('Creating VM with command:', command); // Debug log
-    await execCommand(command);
+    // Create mount/unmount scripts
+    await storage.createMountScript(name);
+    await storage.createUnmountScript(name);
     
     // Store VM configuration
-    console.log('Storing VM configuration...'); // Debug log
-    store.set(`vm.${name}`, {
+    const config = {
       name,
       ram,
       cpus,
-      systemDisk,
-      dataDisk,
-      iso
-    });
+      diskImage,
+      iso,
+      state: 'stopped',
+      selected: false,
+      sharedStorageAttached: false
+    };
+    store.set(`vm.${name}`, config);
     
-    console.log('VM creation completed successfully'); // Debug log
+    // Start VM if ISO is provided
+    if (iso) {
+      event.sender.send('terminal-output', 'Starting VM installation...');
+      try {
+        const pid = await storage.startVm(name, config);
+        vmPids.set(name, pid);
+        store.set(`vm.${name}.state`, 'running');
+        event.sender.send('terminal-output', 'VM started successfully');
+        event.sender.send('terminal-output', 'Note: Use the GUI to attach shared storage when needed');
+      } catch (startError) {
+        event.sender.send('terminal-output', `Failed to start VM: ${startError.message}`);
+        // Clean up on start failure
+        await storage.deleteVmImage(name);
+        store.delete(`vm.${name}`);
+        throw startError;
+      }
+    }
+    
     return { success: true };
   } catch (error) {
-    console.error('Failed to create VM:', error);
+    event.sender.send('terminal-output', `Error: ${error.message}`);
     // Clean up any created resources on failure
     try {
-      console.log('Cleaning up after failure...'); // Debug log
       if (name) {
-        await execCommand(`virsh destroy ${name}`).catch(() => {});
-        await execCommand(`virsh undefine ${name}`).catch(() => {});
-        await cephStorage.deleteVmImages(name).catch(() => {});
+        if (vmPids.has(name)) {
+          await storage.forceKillVm(vmPids.get(name));
+          vmPids.delete(name);
+        }
+        await storage.deleteVmImage(name);
+        store.delete(`vm.${name}`);
       }
     } catch (cleanupError) {
-      console.error('Failed to clean up after error:', cleanupError);
+      event.sender.send('terminal-output', `Cleanup error: ${cleanupError.message}`);
     }
     return { 
       success: false, 
@@ -217,99 +229,159 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso }) => {
   }
 });
 
-ipcMain.handle('clone-vm', async (event, { source, target }) => {
+ipcMain.handle('start-vm', async (event, { name }) => {
   try {
-    const sourceConfig = store.get(`vm.${source}`);
-    if (!sourceConfig) {
-      throw new Error('Source VM not found');
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
     }
 
-    // Clone RBD images
-    const { systemDisk, dataDisk } = await cephStorage.cloneVmImages(source, target);
+    // Double check if VM is already running
+    const currentState = await storage.getVmStatus(name);
+    if (currentState === 'running') {
+      throw new Error('VM is already running');
+    }
 
-    // Clone VM configuration
-    const command = `virt-clone \
-      --original ${source} \
-      --name ${target} \
-      --file ${systemDisk} \
-      --file ${dataDisk}`;
-
-    await execCommand(command);
-
-    store.set(`vm.${target}`, {
-      ...sourceConfig,
-      name: target,
-      systemDisk,
-      dataDisk
-    });
+    event.sender.send('terminal-output', `Starting VM ${name}...`);
+    const pid = await storage.startVm(name, config);
+    
+    // Verify VM actually started
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const newState = await storage.getVmStatus(name);
+    
+    if (newState !== 'running') {
+      throw new Error('Failed to start VM - process did not start properly');
+    }
+    
+    vmPids.set(name, pid);
+    store.set(`vm.${name}.state`, 'running');
+    
+    event.sender.send('terminal-output', 'VM started successfully');
     return { success: true };
   } catch (error) {
-    console.error('Failed to clone VM:', error);
+    event.sender.send('terminal-output', `Error: ${error.message}`);
+    // Ensure state is correctly set even on failure
+    store.set(`vm.${name}.state`, 'stopped');
+    throw error;
+  }
+});
+
+ipcMain.handle('stop-vm', async (event, { name }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    // Double check if VM is actually running
+    const currentState = await storage.getVmStatus(name);
+    if (currentState !== 'running') {
+      throw new Error('VM is not running');
+    }
+
+    const pid = vmPids.get(name);
+    if (!pid) {
+      throw new Error('VM process not found');
+    }
+
+    event.sender.send('terminal-output', `Stopping VM ${name}...`);
+    await storage.stopVm(pid);
+    
+    // Verify VM actually stopped
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const newState = await storage.getVmStatus(name);
+    
+    if (newState === 'running') {
+      throw new Error('Failed to stop VM - process is still running');
+    }
+    
+    vmPids.delete(name);
+    store.set(`vm.${name}.state`, 'stopped');
+    
+    // Reset shared storage state
+    if (config.sharedStorageAttached) {
+      store.set(`vm.${name}.sharedStorageAttached`, false);
+    }
+    
+    event.sender.send('terminal-output', 'VM stopped successfully');
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
     throw error;
   }
 });
 
 ipcMain.handle('delete-vm', async (event, { name }) => {
   try {
-    const vmConfig = store.get(`vm.${name}`);
-    if (!vmConfig) {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
       throw new Error('VM not found');
     }
 
-    // Delete VM
-    await execCommand(`virsh undefine ${name} --remove-all-storage`);
+    event.sender.send('terminal-output', `Deleting VM ${name}...`);
 
-    // Delete RBD images
-    await cephStorage.deleteVmImages(name);
+    // Stop VM if running
+    if (vmPids.has(name)) {
+      await storage.stopVm(vmPids.get(name));
+      vmPids.delete(name);
+    }
 
+    // Delete VM image
+    await storage.deleteVmImage(name);
     store.delete(`vm.${name}`);
-    vmPids.delete(name);
+
+    event.sender.send('terminal-output', 'VM deletion completed successfully');
     return { success: true };
   } catch (error) {
-    console.error('Failed to delete VM:', error);
+    event.sender.send('terminal-output', `Error: ${error.message}`);
     throw error;
   }
 });
 
 ipcMain.handle('snapshot-vm', async (event, { name, snapshotName }) => {
   try {
-    const vmConfig = store.get(`vm.${name}`);
-    if (!vmConfig) {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
       throw new Error('VM not found');
     }
 
-    // Create VM snapshot
-    await execCommand(`virsh snapshot-create-as ${name} ${snapshotName}`);
+    // Stop VM if running
+    if (vmPids.has(name)) {
+      await storage.stopVm(vmPids.get(name));
+      vmPids.delete(name);
+      store.set(`vm.${name}.state`, 'stopped');
+    }
 
-    // Create RBD snapshots
-    await cephStorage.createVmSnapshot(name, snapshotName);
-
+    event.sender.send('terminal-output', `Creating snapshot ${snapshotName} for VM ${name}...`);
+    await storage.createVmSnapshot(name, snapshotName);
+    event.sender.send('terminal-output', 'Snapshot creation completed successfully');
     return { success: true };
   } catch (error) {
-    console.error('Failed to create snapshot:', error);
+    event.sender.send('terminal-output', `Error: ${error.message}`);
     throw error;
   }
 });
 
 ipcMain.handle('restore-vm', async (event, { name, snapshotName }) => {
   try {
-    const vmConfig = store.get(`vm.${name}`);
-    if (!vmConfig) {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
       throw new Error('VM not found');
     }
 
     // Stop VM if running
-    await execCommand(`virsh destroy ${name}`).catch(() => {});
+    if (vmPids.has(name)) {
+      await storage.stopVm(vmPids.get(name));
+      vmPids.delete(name);
+      store.set(`vm.${name}.state`, 'stopped');
+    }
 
-    // Restore RBD snapshots
-    await cephStorage.restoreVmSnapshot(name, snapshotName);
-
-    // Restore VM snapshot
-    await execCommand(`virsh snapshot-revert ${name} ${snapshotName}`);
-
+    event.sender.send('terminal-output', `Restoring snapshot ${snapshotName} for VM ${name}...`);
+    await storage.restoreVmSnapshot(name, snapshotName);
+    event.sender.send('terminal-output', 'Snapshot restoration completed successfully');
     return { success: true };
   } catch (error) {
-    console.error('Failed to restore snapshot:', error);
+    event.sender.send('terminal-output', `Error: ${error.message}`);
     throw error;
   }
 });
@@ -317,7 +389,15 @@ ipcMain.handle('restore-vm', async (event, { name, snapshotName }) => {
 // Resource monitoring
 ipcMain.handle('get-vm-resources', async (event, vmName) => {
   try {
-    const pid = await getVmPid(vmName);
+    const pid = vmPids.get(vmName);
+    if (!pid) {
+      return {
+        cpu: 0,
+        memory: 0,
+        disk: 0
+      };
+    }
+
     const [cpuUsage, memUsage, { usedPercentage: diskUsage }] = await Promise.all([
       getProcessCpuUsage(pid),
       getProcessMemUsage(pid),
@@ -340,24 +420,6 @@ ipcMain.handle('get-vm-resources', async (event, vmName) => {
 });
 
 // Helper functions for process monitoring
-async function getVmPid(vmName) {
-  if (vmPids.has(vmName)) {
-    return vmPids.get(vmName);
-  }
-
-  return new Promise((resolve, reject) => {
-    exec(`pgrep -f "qemu.*${vmName}"`, (error, stdout) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      const pid = parseInt(stdout.trim());
-      vmPids.set(vmName, pid);
-      resolve(pid);
-    });
-  });
-}
-
 async function getProcessCpuUsage(pid) {
   return new Promise((resolve, reject) => {
     exec(`ps -p ${pid} -o %cpu`, (error, stdout) => {
@@ -382,4 +444,209 @@ async function getProcessMemUsage(pid) {
       resolve(memUsage);
     });
   });
-} 
+}
+
+ipcMain.handle('force-kill-vm', async (event, { name }) => {
+  try {
+    if (!vmPids.has(name)) {
+      throw new Error('VM is not running');
+    }
+
+    event.sender.send('terminal-output', `Force killing VM ${name}...`);
+    await storage.forceKillVm(vmPids.get(name));
+    vmPids.delete(name);
+    store.set(`vm.${name}.state`, 'stopped');
+    
+    event.sender.send('terminal-output', 'VM force killed successfully');
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
+    throw error;
+  }
+});
+
+// Selected VMs for clipboard sharing
+ipcMain.handle('select-vm', async (event, { name, selected }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    if (selected) {
+      selectedVMs.add(name);
+    } else {
+      selectedVMs.delete(name);
+    }
+
+    // Update VM configuration
+    store.set(`vm.${name}.selected`, selected);
+    
+    // If VM is running, update SPICE agent configuration
+    if (vmPids.has(name)) {
+      const spiceSocket = storage.getVmSpiceSocket(name);
+      // TODO: Update SPICE configuration for clipboard sharing
+    }
+
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-selected-vms', async () => {
+  return Array.from(selectedVMs);
+});
+
+// Shared storage management
+ipcMain.handle('attach-shared-storage', async (event, { name }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    if (!vmPids.has(name)) {
+      throw new Error('VM is not running');
+    }
+
+    event.sender.send('terminal-output', `Attaching shared storage to VM ${name}...`);
+    await storage.attachSharedStorage(name);
+    
+    // Update VM configuration
+    store.set(`vm.${name}.sharedStorageAttached`, true);
+    
+    event.sender.send('terminal-output', 'Shared storage attached successfully');
+    event.sender.send('terminal-output', 'Run mount-shared.sh inside the VM to mount the storage');
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
+    throw error;
+  }
+});
+
+ipcMain.handle('detach-shared-storage', async (event, { name }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    if (!vmPids.has(name)) {
+      throw new Error('VM is not running');
+    }
+
+    event.sender.send('terminal-output', `Detaching shared storage from VM ${name}...`);
+    event.sender.send('terminal-output', 'Please run unmount-shared.sh inside the VM first');
+    
+    await storage.detachSharedStorage(name);
+    
+    // Update VM configuration
+    store.set(`vm.${name}.sharedStorageAttached`, false);
+    
+    event.sender.send('terminal-output', 'Shared storage detached successfully');
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-shared-storage-status', async (event, { name }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    if (!vmPids.has(name)) {
+      return { attached: false };
+    }
+
+    const attached = await storage.isSharedStorageAttached(name);
+    return { attached };
+  } catch (error) {
+    console.error('Failed to get shared storage status:', error);
+    return { attached: false };
+  }
+});
+
+// Update VM settings
+ipcMain.handle('update-vm-settings', async (event, { name, settings }) => {
+  try {
+    const config = store.get(`vm.${name}`);
+    if (!config) {
+      throw new Error('VM not found');
+    }
+
+    const isRunning = vmPids.has(name);
+    
+    // Update RAM and CPUs only if VM is stopped
+    if (!isRunning) {
+      if (settings.ram && settings.ram >= 512) {
+        store.set(`vm.${name}.ram`, settings.ram);
+      }
+      if (settings.cpus && settings.cpus >= 1) {
+        store.set(`vm.${name}.cpus`, settings.cpus);
+      }
+    }
+
+    // Handle shared storage toggle if VM is running
+    if (isRunning && settings.sharedStorageAttached !== config.sharedStorageAttached) {
+      if (settings.sharedStorageAttached) {
+        await storage.attachSharedStorage(name);
+        event.sender.send('terminal-output', 'Run mount-shared.sh inside the VM to mount the storage');
+      } else {
+        event.sender.send('terminal-output', 'Please run unmount-shared.sh inside the VM first');
+        await storage.detachSharedStorage(name);
+      }
+      store.set(`vm.${name}.sharedStorageAttached`, settings.sharedStorageAttached);
+    }
+
+    return { success: true };
+  } catch (error) {
+    event.sender.send('terminal-output', `Error: ${error.message}`);
+    throw error;
+  }
+});
+
+// Check VM states
+ipcMain.handle('check-vm-states', async () => {
+  try {
+    const configs = store.get('vm') || {};
+    const states = {};
+
+    // Check each VM's actual state
+    for (const [name, config] of Object.entries(configs)) {
+      try {
+        // Get actual state from process check
+        const actualState = await storage.getVmStatus(name);
+        
+        // If stored state doesn't match actual state, update it
+        if (config.state !== actualState) {
+          store.set(`vm.${name}.state`, actualState);
+          
+          // If VM was running but now isn't, clean up
+          if (config.state === 'running' && actualState === 'stopped') {
+            vmPids.delete(name);
+            // Also update shared storage state
+            if (config.sharedStorageAttached) {
+              store.set(`vm.${name}.sharedStorageAttached`, false);
+            }
+          }
+        }
+        
+        states[name] = actualState;
+      } catch (error) {
+        console.error(`Failed to check state for VM ${name}:`, error);
+        states[name] = 'unknown';
+      }
+    }
+
+    return states;
+  } catch (error) {
+    console.error('Failed to check VM states:', error);
+    throw error;
+  }
+});

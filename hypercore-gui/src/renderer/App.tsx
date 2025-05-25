@@ -15,9 +15,13 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  IconButton,
   Collapse,
   InputAdornment,
+  CircularProgress,
+  Paper,
+  IconButton,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -28,9 +32,16 @@ import {
   Settings as SettingsIcon,
   ExpandMore as ExpandMoreIcon,
   FolderOpen as FolderIcon,
+  PlayArrow as StartIcon,
+  Stop as StopIcon,
+  Storage as StorageIcon,
+  Close as CloseIcon,
+  PowerOff as KillIcon,
 } from '@mui/icons-material';
+import { MenuIconButton, MenuContainer } from './components/StyledMenu';
 import ResourceMonitor from './components/ResourceMonitor';
 import FileDialog from './components/FileDialog';
+import { IpcRendererEvent } from 'electron';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -41,6 +52,8 @@ interface VM {
   systemDisk: string;
   dataDisk: string;
   iso?: string;
+  state: string;
+  sharedStorageAttached: boolean;
 }
 
 function App() {
@@ -59,9 +72,45 @@ function App() {
     onSelect: () => {},
   });
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [terminalOutput, setTerminalOutput] = useState('');
+  const [terminalDialogOpen, setTerminalDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [selectedVM, setSelectedVM] = useState<string | null>(null);
+  const [vmSettings, setVmSettings] = useState<Partial<VM>>({});
 
   useEffect(() => {
     loadVMs();
+    ipcRenderer.on('terminal-output', (_event: IpcRendererEvent, output: string) => {
+      setTerminalOutput(prev => prev + '\n' + output);
+      setTerminalDialogOpen(true);
+    });
+
+    // Set up periodic status check
+    const statusCheckInterval = setInterval(async () => {
+      try {
+        // Get current VM states
+        const states = await ipcRenderer.invoke('check-vm-states') as Record<string, string>;
+        
+        // Update VM states
+        setVms(prevVms => {
+          const updatedVms = { ...prevVms };
+          Object.entries(states).forEach(([name, state]) => {
+            if (updatedVms[name] && updatedVms[name].state !== state) {
+              updatedVms[name] = { ...updatedVms[name], state };
+            }
+          });
+          return updatedVms;
+        });
+      } catch (error) {
+        console.error('Failed to check VM states:', error);
+      }
+    }, 5000); // Check every 5 seconds
+
+    return () => {
+      ipcRenderer.removeAllListeners('terminal-output');
+      clearInterval(statusCheckInterval);
+    };
   }, []);
 
   const loadVMs = async () => {
@@ -87,16 +136,16 @@ function App() {
 
   const handleCreateVM = async () => {
     try {
-      console.log('Creating VM with config:', newVm);
+      setIsLoading(true);
       setError(null);
+      setTerminalOutput('');
+      
       if (!validateVmConfig(newVm)) {
-        console.log('Validation failed');
+        setIsLoading(false);
         return;
       }
 
-      console.log('Sending create-vm request to main process');
       const result = await ipcRenderer.invoke('create-vm', newVm);
-      console.log('Received result:', result);
       
       if (result.success) {
         await loadVMs();
@@ -108,34 +157,48 @@ function App() {
     } catch (err: any) {
       console.error('Failed to create VM:', err);
       setError('Failed to create VM: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleDeleteVM = async (name: string) => {
     try {
+      setIsLoading(true);
+      setTerminalOutput('');
       await ipcRenderer.invoke('delete-vm', { name });
       await loadVMs();
     } catch (error) {
       console.error('Failed to delete VM:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleCloneVM = async (source: string) => {
-    const target = `${source}-clone`;
     try {
+      setIsLoading(true);
+      setTerminalOutput('');
+      const target = `${source}-clone`;
       await ipcRenderer.invoke('clone-vm', { source, target });
       await loadVMs();
     } catch (error) {
       console.error('Failed to clone VM:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleSnapshotVM = async (name: string) => {
-    const snapshotName = `${name}-snapshot-${Date.now()}`;
     try {
+      setIsLoading(true);
+      setTerminalOutput('');
+      const snapshotName = `${name}-snapshot-${Date.now()}`;
       await ipcRenderer.invoke('snapshot-vm', { name, snapshotName });
     } catch (error) {
       console.error('Failed to create snapshot:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -152,6 +215,92 @@ function App() {
     setFileDialogOpen(true);
   };
 
+  const handleToggleSharedStorage = async (name: string) => {
+    try {
+      setIsLoading(true);
+      setTerminalOutput('');
+      const vm = vms[name];
+      
+      if (vm.sharedStorageAttached) {
+        await ipcRenderer.invoke('detach-shared-storage', { name });
+      } else {
+        await ipcRenderer.invoke('attach-shared-storage', { name });
+      }
+      
+      await loadVMs();
+    } catch (error) {
+      console.error('Failed to toggle shared storage:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStartVM = async (name: string) => {
+    try {
+      setIsLoading(true);
+      setTerminalOutput('');
+      await ipcRenderer.invoke('start-vm', { name });
+      await loadVMs();
+    } catch (error) {
+      console.error('Failed to start VM:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStopVM = async (name: string) => {
+    try {
+      setIsLoading(true);
+      setTerminalOutput('');
+      await ipcRenderer.invoke('stop-vm', { name });
+      await loadVMs();
+    } catch (error) {
+      console.error('Failed to stop VM:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKillVM = async (name: string) => {
+    try {
+      setIsLoading(true);
+      setTerminalOutput('');
+      await ipcRenderer.invoke('force-kill-vm', { name });
+      await loadVMs();
+    } catch (error) {
+      console.error('Failed to kill VM:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateSettings = async () => {
+    try {
+      if (!selectedVM) return;
+      
+      setIsLoading(true);
+      setTerminalOutput('');
+      
+      await ipcRenderer.invoke('update-vm-settings', {
+        name: selectedVM,
+        settings: vmSettings
+      });
+      
+      await loadVMs();
+      setSettingsDialogOpen(false);
+    } catch (error) {
+      console.error('Failed to update VM settings:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOpenSettings = (name: string) => {
+    setSelectedVM(name);
+    setVmSettings(vms[name]);
+    setSettingsDialogOpen(true);
+  };
+
   return (
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
@@ -159,58 +308,173 @@ function App() {
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             Hypercore VM Manager
           </Typography>
-          <IconButton color="inherit" onClick={() => setCreateDialogOpen(true)}>
-            <AddIcon />
-          </IconButton>
+          <MenuContainer>
+            <MenuIconButton
+              icon={AddIcon}
+              tooltip="Create New VM"
+              onClick={() => setCreateDialogOpen(true)}
+            />
+            <MenuIconButton
+              icon={SettingsIcon}
+              tooltip="Settings"
+              onClick={() => {/* TODO: Implement settings */}}
+            />
+          </MenuContainer>
         </Toolbar>
       </AppBar>
 
       <Container sx={{ mt: 4 }}>
+        {isLoading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+            <CircularProgress />
+          </Box>
+        )}
         <Grid container spacing={3}>
           {Object.entries(vms).map(([name, vm]) => (
-            <Grid item xs={12} key={name}>
-              <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box>
-                      <Typography variant="h6">{name}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        RAM: {vm.ram}MB | CPUs: {vm.cpus}
+            <Grid item xs={12} md={6} key={name}>
+              <Card sx={{ 
+                minHeight: '300px',
+                display: 'flex',
+                flexDirection: 'column',
+                backgroundColor: 'background.paper',
+                boxShadow: 3,
+                '&:hover': {
+                  boxShadow: 6,
+                },
+              }}>
+                <CardContent sx={{ flexGrow: 1 }}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}>
+                    <Box sx={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}>
+                      <Typography variant="h5" component="div" sx={{ fontWeight: 'bold' }}>
+                        {name}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        System Disk: {vm.systemDisk}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Data Disk: {vm.dataDisk}
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <IconButton onClick={() => handleCloneVM(name)}>
-                        <CloneIcon />
-                      </IconButton>
-                      <IconButton onClick={() => handleSnapshotVM(name)}>
-                        <SnapshotIcon />
-                      </IconButton>
-                      <IconButton onClick={() => handleDeleteVM(name)}>
-                        <DeleteIcon />
-                      </IconButton>
-                      <IconButton>
-                        <SettingsIcon />
-                      </IconButton>
-                      <IconButton
-                        onClick={() => toggleExpand(name)}
-                        sx={{
-                          transform: expandedVM === name ? 'rotate(180deg)' : 'rotate(0deg)',
-                          transition: 'transform 0.3s',
+                      <Typography 
+                        variant="subtitle1" 
+                        sx={{ 
+                          color: vm.state === 'running' ? 'success.main' : 'text.secondary',
+                          fontWeight: 'medium',
                         }}
                       >
-                        <ExpandMoreIcon />
-                      </IconButton>
+                        {vm.state === 'running' ? '● Running' : '○ Stopped'}
+                      </Typography>
+                    </Box>
+                    
+                    <Box sx={{ display: 'flex', gap: 4 }}>
+                      <Box>
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Resources
+                        </Typography>
+                        <Typography variant="body1">
+                          RAM: {vm.ram}MB
+                        </Typography>
+                        <Typography variant="body1">
+                          CPUs: {vm.cpus}
+                        </Typography>
+                      </Box>
+                      
+                      <Box>
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Storage
+                        </Typography>
+                        <Typography variant="body1">
+                          System: {vm.systemDisk}
+                        </Typography>
+                        <Typography variant="body1" sx={{
+                          color: vm.sharedStorageAttached ? 'success.main' : 'text.secondary'
+                        }}>
+                          Shared Storage: {vm.sharedStorageAttached ? 'Connected' : 'Not Connected'}
+                        </Typography>
+                      </Box>
                     </Box>
                   </Box>
                 </CardContent>
+
+                <CardActions sx={{ 
+                  borderTop: 1, 
+                  borderColor: 'divider',
+                  backgroundColor: 'background.default',
+                  p: 2,
+                }}>
+                  <MenuContainer>
+                    <MenuIconButton
+                      icon={StartIcon}
+                      tooltip="Start VM"
+                      onClick={() => handleStartVM(name)}
+                      disabled={vm.state === 'running'}
+                      color="success"
+                    />
+                    <MenuIconButton
+                      icon={StopIcon}
+                      tooltip="Stop VM (Graceful Shutdown)"
+                      onClick={() => handleStopVM(name)}
+                      disabled={vm.state !== 'running'}
+                      color="warning"
+                    />
+                    <MenuIconButton
+                      icon={KillIcon}
+                      tooltip="Force Kill VM"
+                      onClick={() => handleKillVM(name)}
+                      disabled={vm.state !== 'running'}
+                      color="error"
+                    />
+                    <MenuIconButton
+                      icon={StorageIcon}
+                      tooltip={vm.sharedStorageAttached ? "Detach Shared Storage" : "Attach Shared Storage"}
+                      onClick={() => handleToggleSharedStorage(name)}
+                      disabled={vm.state !== 'running'}
+                      color={vm.sharedStorageAttached ? "warning" : "primary"}
+                    />
+                    <MenuIconButton
+                      icon={SettingsIcon}
+                      tooltip="VM Settings"
+                      onClick={() => handleOpenSettings(name)}
+                      color="info"
+                    />
+                    <MenuIconButton
+                      icon={CloneIcon}
+                      tooltip="Clone VM"
+                      onClick={() => handleCloneVM(name)}
+                      disabled={vm.state === 'running'}
+                    />
+                    <MenuIconButton
+                      icon={SnapshotIcon}
+                      tooltip="Create Snapshot"
+                      onClick={() => handleSnapshotVM(name)}
+                      disabled={vm.state === 'running'}
+                    />
+                    <MenuIconButton
+                      icon={DeleteIcon}
+                      tooltip="Delete VM"
+                      onClick={() => handleDeleteVM(name)}
+                      disabled={vm.state === 'running'}
+                      color="error"
+                    />
+                    <MenuIconButton
+                      icon={ExpandMoreIcon}
+                      tooltip={expandedVM === name ? "Hide Details" : "Show Details"}
+                      onClick={() => toggleExpand(name)}
+                      sx={{
+                        transform: expandedVM === name ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 0.3s',
+                      }}
+                    />
+                  </MenuContainer>
+                </CardActions>
+
                 <Collapse in={expandedVM === name}>
-                  <CardContent>
+                  <CardContent sx={{ 
+                    backgroundColor: 'background.default',
+                    borderTop: 1,
+                    borderColor: 'divider',
+                  }}>
                     <ResourceMonitor vmName={name} />
                   </CardContent>
                 </Collapse>
@@ -329,6 +593,34 @@ function App() {
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={terminalDialogOpen}
+        onClose={() => setTerminalDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Terminal Output</DialogTitle>
+        <DialogContent>
+          <Paper
+            sx={{
+              p: 2,
+              backgroundColor: '#000',
+              color: '#fff',
+              fontFamily: 'monospace',
+              whiteSpace: 'pre-wrap',
+              minHeight: '200px',
+              maxHeight: '400px',
+              overflow: 'auto'
+            }}
+          >
+            {terminalOutput || 'No output available'}
+          </Paper>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTerminalDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
       <FileDialog
         open={fileDialogOpen}
         onClose={() => setFileDialogOpen(false)}
@@ -340,6 +632,69 @@ function App() {
         }}
         fileFilter={['.iso']}
       />
+
+      <Dialog 
+        open={settingsDialogOpen} 
+        onClose={() => setSettingsDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" justifyContent="space-between">
+            <Typography variant="h6">VM Settings</Typography>
+            <IconButton onClick={() => setSettingsDialogOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <TextField
+              fullWidth
+              label="RAM (MB)"
+              type="number"
+              value={vmSettings.ram || ''}
+              onChange={(e) => setVmSettings({ ...vmSettings, ram: parseInt(e.target.value) })}
+              sx={{ mb: 2 }}
+              helperText="Minimum 512MB recommended"
+            />
+            <TextField
+              fullWidth
+              label="CPUs"
+              type="number"
+              value={vmSettings.cpus || ''}
+              onChange={(e) => setVmSettings({ ...vmSettings, cpus: parseInt(e.target.value) })}
+              sx={{ mb: 2 }}
+              helperText="Number of CPU cores"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={vmSettings.sharedStorageAttached}
+                  onChange={(e) => setVmSettings({ ...vmSettings, sharedStorageAttached: e.target.checked })}
+                  disabled={!selectedVM || vms[selectedVM!]?.state !== 'running'}
+                />
+              }
+              label="Shared Storage"
+            />
+            {vms[selectedVM!]?.state === 'running' && (
+              <Typography variant="caption" color="text.secondary" display="block">
+                Note: Some settings can only be changed when the VM is stopped
+              </Typography>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSettingsDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleUpdateSettings}
+            variant="contained" 
+            color="primary"
+          >
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
