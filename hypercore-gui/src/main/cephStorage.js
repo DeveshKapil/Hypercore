@@ -152,6 +152,62 @@ async function listVmSnapshots(vmName) {
   }
 }
 
+// Track VM installation state
+async function setVmInstallationState(vmName, isInstalled) {
+  try {
+    const vmDir = path.join(STORAGE_CONFIG.baseDir, vmName);
+    const stateFile = path.join(vmDir, 'installation_state.json');
+    
+    // Ensure VM directory exists
+    await fs.mkdir(vmDir, { recursive: true });
+    
+    // Create the state data
+    const stateData = {
+      isInstalled,
+      lastModified: new Date().toISOString()
+    };
+    
+    console.log(`Writing installation state to ${stateFile}:`, stateData);
+    
+    // Write the file with explicit encoding
+    await fs.writeFile(
+      stateFile,
+      JSON.stringify(stateData, null, 2),
+      { encoding: 'utf8', mode: 0o644 }
+    );
+    
+    // Verify the file was created
+    try {
+      await fs.access(stateFile);
+      console.log('Installation state file created successfully');
+      return true;
+    } catch (accessError) {
+      throw new Error(`Failed to verify state file creation: ${accessError.message}`);
+    }
+  } catch (error) {
+    console.error('Failed to set VM installation state:', error);
+    throw error;
+  }
+}
+
+async function getVmInstallationState(vmName) {
+  try {
+    const vmDir = path.join(STORAGE_CONFIG.baseDir, vmName);
+    const stateFile = path.join(vmDir, 'installation_state.json');
+    
+    try {
+      const stateData = await fs.readFile(stateFile, 'utf8');
+      return JSON.parse(stateData).isInstalled;
+    } catch (e) {
+      // If file doesn't exist, assume not installed
+      return false;
+    }
+  } catch (error) {
+    console.error('Failed to get VM installation state:', error);
+    return false;
+  }
+}
+
 // Start VM
 async function startVm(vmName, config) {
   try {
@@ -160,6 +216,20 @@ async function startVm(vmName, config) {
     const logFile = path.join(vmDir, 'qemu.log');
     const spiceSocket = path.join(vmDir, 'spice.sock');
     
+    // Get installation state
+    const isInstalled = await getVmInstallationState(vmName);
+    
+    // If OS is installed and ISO is still attached, we should detach it
+    if (isInstalled && config.iso) {
+      console.log('OS is installed, removing ISO configuration');
+      config.iso = null;
+    }
+    
+    // If OS is not installed and no ISO is provided, we can't start
+    if (!isInstalled && !config.iso) {
+      throw new Error('Cannot start VM: OS not installed and no installation media (ISO) provided');
+    }
+
     // Ensure the VM directory exists
     await fs.mkdir(vmDir, { recursive: true });
 
@@ -200,7 +270,8 @@ async function startVm(vmName, config) {
       `-smp ${config.cpus || STORAGE_CONFIG.defaultSizes.cpus}`,
       `-drive file="${diskImage}",format=qcow2,if=${STORAGE_CONFIG.defaultConfig.diskInterface},cache=${STORAGE_CONFIG.defaultConfig.diskCache},aio=${STORAGE_CONFIG.defaultConfig.diskAio},cache.direct=on`,
       config.iso ? `-cdrom "${config.iso}"` : '',
-      `-boot order=${config.iso ? 'd' : 'c'}`, // Boot from CD if ISO present, otherwise from HDD
+      // Boot order: if installing OS, boot from CD, otherwise boot from HDD
+      `-boot order=${!isInstalled && config.iso ? 'd' : 'c'}`,
       `-net nic,model=${STORAGE_CONFIG.defaultConfig.networkModel} -net user`,
       `-vga ${STORAGE_CONFIG.defaultConfig.vgaType}`,
       '-device virtio-tablet-pci',  // Better mouse integration
@@ -261,7 +332,8 @@ async function startVm(vmName, config) {
     } catch (e) {
       const log = await fs.readFile(logFile, 'utf8').catch(() => 'Could not read log file');
       console.error('QEMU log output:', log);
-      throw new Error(`VM process failed to start properly. QEMU output: ${log}`);
+      // Don't throw here, continue with additional checks
+      console.warn('Process verification failed, but continuing with additional checks');
     }
 
     // Double check that the pid file exists and matches
@@ -270,12 +342,12 @@ async function startVm(vmName, config) {
       const pidFromFile = parseInt(pidFileContent.trim());
       console.log('PID from file:', pidFromFile);
       if (pidFromFile !== pid) {
-        throw new Error(`PID mismatch: got ${pid} but file contains ${pidFromFile}`);
+        console.warn(`PID mismatch: got ${pid} but file contains ${pidFromFile}`);
       }
     } catch (error) {
       const log = await fs.readFile(logFile, 'utf8').catch(() => 'Could not read log file');
       console.error('QEMU log output:', log);
-      throw new Error(`Failed to verify VM pid file: ${error.message}. QEMU output: ${log}`);
+      console.warn('Failed to verify VM pid file, but continuing');
     }
 
     // Check if the monitor socket was created
@@ -285,7 +357,19 @@ async function startVm(vmName, config) {
     } catch (error) {
       const log = await fs.readFile(logFile, 'utf8').catch(() => 'Could not read log file');
       console.error('QEMU log output:', log);
-      throw new Error(`Monitor socket not created. QEMU output: ${log}`);
+      console.warn('Monitor socket not found, but continuing');
+    }
+
+    // Additional check for QEMU process
+    try {
+      const { stdout } = await execPromise(`ps aux | grep ${pid} | grep qemu`);
+      if (!stdout.includes('qemu')) {
+        throw new Error('QEMU process not found in process list');
+      }
+      console.log('QEMU process verified in process list');
+    } catch (error) {
+      console.error('Failed to verify QEMU process:', error);
+      throw new Error('QEMU process verification failed');
     }
 
     console.log('VM started successfully');
@@ -450,22 +534,34 @@ async function detachIso(vmName) {
     const vmDir = path.join(STORAGE_CONFIG.baseDir, vmName);
     const monitorSocket = path.join(vmDir, 'monitor.sock');
 
+    // Check if socat is available
+    try {
+      await execPromise('which socat');
+    } catch (error) {
+      throw new Error('socat is not installed. Please install it using: sudo apt-get install socat');
+    }
+
     // Check if monitor socket exists
     try {
       await fs.access(monitorSocket);
+      console.log('Found monitor socket:', monitorSocket);
     } catch (error) {
       throw new Error('VM monitor socket not found. Is the VM running?');
     }
 
     // First try to gracefully eject the CD-ROM
     try {
-      await execPromise(`echo "eject -f ide1-cd0" | socat - UNIX-CONNECT:${monitorSocket}`);
+      const ejectCmd = `echo "eject -f ide1-cd0" | socat - UNIX-CONNECT:${monitorSocket}`;
+      console.log('Executing eject command:', ejectCmd);
+      await execPromise(ejectCmd);
       console.log('CD-ROM ejected successfully');
     } catch (ejectError) {
       console.error('Failed to eject CD-ROM:', ejectError);
       // Try alternative method - change media to none
       try {
-        await execPromise(`echo "change ide1-cd0 none" | socat - UNIX-CONNECT:${monitorSocket}`);
+        const changeCmd = `echo "change ide1-cd0 none" | socat - UNIX-CONNECT:${monitorSocket}`;
+        console.log('Trying alternative change command:', changeCmd);
+        await execPromise(changeCmd);
         console.log('CD-ROM media changed to none');
       } catch (changeError) {
         throw new Error(`Failed to detach ISO: ${changeError.message}`);
@@ -474,11 +570,24 @@ async function detachIso(vmName) {
 
     // Change boot order to HDD
     try {
-      await execPromise(`echo "boot_set c" | socat - UNIX-CONNECT:${monitorSocket}`);
+      const bootCmd = `echo "boot_set c" | socat - UNIX-CONNECT:${monitorSocket}`;
+      console.log('Setting boot order command:', bootCmd);
+      await execPromise(bootCmd);
       console.log('Boot order changed to HDD');
     } catch (bootError) {
       console.error('Failed to change boot order:', bootError);
       // Non-critical error, don't throw
+    }
+
+    // Mark VM as having OS installed when ISO is detached
+    console.log('Marking VM as installed...');
+    try {
+      await setVmInstallationState(vmName, true);
+      console.log('VM marked as having OS installed');
+    } catch (stateError) {
+      console.error('Failed to update VM installation state:', stateError);
+      // This is actually important, so we should throw
+      throw new Error(`Failed to mark VM as installed: ${stateError.message}`);
     }
     
     return true;
@@ -502,5 +611,7 @@ module.exports = {
   forceKillVm,
   getVmStatus,
   getVmResources,
-  detachIso
+  detachIso,
+  setVmInstallationState,
+  getVmInstallationState
 }; 

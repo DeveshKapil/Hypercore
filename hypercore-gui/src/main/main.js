@@ -6,6 +6,7 @@ const osu = require('node-os-utils');
 const fs = require('fs').promises;
 const os = require('os');
 const storage = require('./cephStorage');
+const sharedStorage = require('./sharedStorage');
 const { STORAGE_CONFIG } = require('./cephStorage');
 
 const store = new Store();
@@ -260,9 +261,9 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso, storageSize })
     const { diskImage } = await storage.createVmImage(name, storageSize);
     event.sender.send('terminal-output', `Created disk: ${diskImage}`);
     
-    // Create mount/unmount scripts
-    await storage.createMountScript(name);
-    await storage.createUnmountScript(name);
+    // Create mount/unmount scripts using sharedStorage module
+    await sharedStorage.createMountScript(name);
+    await sharedStorage.createUnmountScript(name);
     
     // Store VM configuration
     const config = {
@@ -299,15 +300,16 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso, storageSize })
     return { success: true };
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
-    // Clean up any created resources on failure
+    // Clean up any created resources on failure, but preserve files for debugging
     try {
       if (name) {
         if (vmPids.has(name)) {
           await storage.forceKillVm(vmPids.get(name));
           vmPids.delete(name);
         }
-        await storage.deleteVmImage(name);
-        store.delete(`vm.${name}`);
+        // Don't delete VM image and files for debugging purposes
+        // await storage.deleteVmImage(name);
+        store.set(`vm.${name}.state`, 'failed');  // Mark as failed instead of deleting
       }
     } catch (cleanupError) {
       event.sender.send('terminal-output', `Cleanup error: ${cleanupError.message}`);
