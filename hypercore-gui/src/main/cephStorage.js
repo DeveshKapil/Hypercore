@@ -566,20 +566,36 @@ async function detachIso(vmName) {
       throw new Error('socat is not installed. Please install it using: sudo apt-get install socat');
     }
 
-    // Check if monitor socket exists
-    try {
-      await fs.access(monitorSocket);
-      console.log('Found monitor socket:', monitorSocket);
-    } catch (error) {
-      throw new Error('VM monitor socket not found. Is the VM running?');
+    // Wait for monitor socket to be ready with retries
+    const maxRetries = 10;
+    const retryDelay = 2000; // 2 seconds between retries
+    let socketReady = false;
+
+    for (let i = 0; i < maxRetries && !socketReady; i++) {
+      try {
+        await fs.access(monitorSocket);
+        // Additional check - try a simple monitor command
+        await execPromise(`echo "info status" | socat - UNIX-CONNECT:${monitorSocket}`);
+        socketReady = true;
+        console.log('Monitor socket is ready');
+      } catch (error) {
+        console.log(`Waiting for monitor socket (attempt ${i + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
+
+    if (!socketReady) {
+      throw new Error('Monitor socket not ready after maximum retries');
     }
 
     // First try to gracefully eject the CD-ROM
+    let success = false;
     try {
       const ejectCmd = `echo "eject -f ide1-cd0" | socat - UNIX-CONNECT:${monitorSocket}`;
       console.log('Executing eject command:', ejectCmd);
       await execPromise(ejectCmd);
       console.log('CD-ROM ejected successfully');
+      success = true;
     } catch (ejectError) {
       console.error('Failed to eject CD-ROM:', ejectError);
       // Try alternative method - change media to none
@@ -588,9 +604,15 @@ async function detachIso(vmName) {
         console.log('Trying alternative change command:', changeCmd);
         await execPromise(changeCmd);
         console.log('CD-ROM media changed to none');
+        success = true;
       } catch (changeError) {
-        throw new Error(`Failed to detach ISO: ${changeError.message}`);
+        console.error('Failed to change media:', changeError);
       }
+    }
+
+    if (!success) {
+      console.log('ISO detachment not critical for VM operation, continuing...');
+      return false;
     }
 
     // Change boot order to HDD
@@ -618,7 +640,8 @@ async function detachIso(vmName) {
     return true;
   } catch (error) {
     console.error('Failed to detach ISO:', error);
-    throw error;
+    // Don't throw the error since ISO detachment is not critical for VM operation
+    return false;
   }
 }
 

@@ -352,6 +352,25 @@ ipcMain.handle('start-vm', async (event, { name }) => {
       store.set(`vm.${name}.hasBooted`, true);
     }
 
+    // Launch SPICE viewer
+    const vmDir = path.join(STORAGE_CONFIG.baseDir, name);
+    const spiceSocket = path.join(vmDir, 'spice.sock');
+    
+    // Wait a moment for the SPICE socket to be ready
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    try {
+      // Check if remote-viewer is installed
+      await execPromise('which remote-viewer');
+      
+      // Launch SPICE viewer
+      const spiceCmd = `remote-viewer spice+unix://${spiceSocket} &`;
+      await execPromise(spiceCmd);
+      event.sender.send('terminal-output', 'SPICE viewer launched');
+    } catch (error) {
+      event.sender.send('terminal-output', 'Warning: Failed to launch SPICE viewer. Please install virt-viewer package: sudo apt-get install virt-viewer');
+    }
+
     event.sender.send('terminal-output', 'VM started successfully');
     return { success: true };
   } catch (error) {
