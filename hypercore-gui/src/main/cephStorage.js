@@ -269,9 +269,9 @@ async function startVm(vmName, config) {
       '-cpu host',
       `-smp ${config.cpus || STORAGE_CONFIG.defaultSizes.cpus}`,
       `-drive file="${diskImage}",format=qcow2,if=${STORAGE_CONFIG.defaultConfig.diskInterface},cache=${STORAGE_CONFIG.defaultConfig.diskCache},aio=${STORAGE_CONFIG.defaultConfig.diskAio},cache.direct=on`,
-      // Add shared storage if enabled
-      config.sharedStorageAttached ? `-drive file="${path.join(os.homedir(), '.hypercore', 'shared', 'shared.qcow2')}",format=qcow2,if=none,id=shared_drive` : '',
-      config.sharedStorageAttached ? '-device virtio-blk-pci,drive=shared_drive,id=shared_disk' : '',
+      // Add 9P shared folder support (always enabled)
+      `-fsdev local,security_model=passthrough,id=fsdev0,path=${path.join(os.homedir(), '.hypercore', 'shared_folder')}`,
+      `-device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=hypercore_share`,
       config.iso ? `-cdrom "${config.iso}"` : '',
       // Boot order: if installing OS, boot from CD, otherwise boot from HDD
       `-boot order=${!isInstalled && config.iso ? 'd' : 'c'}`,

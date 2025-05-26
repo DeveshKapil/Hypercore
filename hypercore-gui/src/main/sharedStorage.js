@@ -230,6 +230,13 @@ async function createMountScript(vmName) {
 # Mount shared storage for Hypercore VM
 # This script requires root privileges
 
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "Error: This script must be run as root"
+    echo "Please run: sudo $0"
+    exit 1
+fi
+
 # Function to detect the Linux distribution
 detect_distro() {
     if [ -f /etc/os-release ]; then
@@ -244,73 +251,63 @@ detect_distro() {
     fi
 }
 
-# Function to install QEMU guest agent
-install_qemu_guest_agent() {
+# Function to install required packages
+install_required_packages() {
     local distro=$(detect_distro)
     echo "Detected distribution: $distro"
     
+    # Clear any stale locks that might exist
+    rm -f /var/lib/apt/lists/lock
+    rm -f /var/cache/apt/archives/lock
+    rm -f /var/lib/dpkg/lock*
+    
     case "$distro" in
         "ubuntu"|"debian")
-            apt-get update
-            apt-get install -y qemu-guest-agent
-            systemctl enable qemu-guest-agent
-            systemctl start qemu-guest-agent
+            apt-get update || { echo "Failed to update package lists. Error: $?"; exit 1; }
+            apt-get install -y qemu-guest-agent || { echo "Failed to install qemu-guest-agent. Error: $?"; exit 1; }
+            systemctl enable qemu-guest-agent || { echo "Failed to enable qemu-guest-agent service. Error: $?"; exit 1; }
+            systemctl start qemu-guest-agent || { echo "Failed to start qemu-guest-agent service. Error: $?"; exit 1; }
             ;;
         "fedora"|"rhel"|"centos")
-            dnf install -y qemu-guest-agent
-            systemctl enable qemu-guest-agent
-            systemctl start qemu-guest-agent
-            ;;
-        "arch"|"manjaro")
-            pacman -Sy --noconfirm qemu-guest-agent
-            systemctl enable qemu-guest-agent
-            systemctl start qemu-guest-agent
-            ;;
-        "opensuse"*)
-            zypper install -y qemu-guest-agent
-            systemctl enable qemu-guest-agent
-            systemctl start qemu-guest-agent
+            dnf install -y qemu-guest-agent || { echo "Failed to install qemu-guest-agent. Error: $?"; exit 1; }
+            systemctl enable qemu-guest-agent || { echo "Failed to enable qemu-guest-agent service. Error: $?"; exit 1; }
+            systemctl start qemu-guest-agent || { echo "Failed to start qemu-guest-agent service. Error: $?"; exit 1; }
             ;;
         *)
-            echo "Unsupported distribution for automatic installation"
-            echo "Please install QEMU guest agent manually"
+            echo "Please install QEMU guest agent manually for your distribution"
             ;;
     esac
 }
 
-# Check and install QEMU guest agent if not present
+echo "Checking QEMU guest agent status..."
 if ! systemctl is-active --quiet qemu-guest-agent; then
     echo "QEMU guest agent not running. Installing..."
-    install_qemu_guest_agent
+    install_required_packages
 else
     echo "QEMU guest agent is already running"
 fi
 
-# Create mount point if it doesn't exist
-mkdir -p ${mountPoint}
+echo "Creating mount point ${mountPoint}..."
+mkdir -p ${mountPoint} || { echo "Failed to create mount point. Error: $?"; exit 1; }
 
-# Get the device name for shared storage
-DEVICE=$(lsblk -o NAME,SERIAL | grep shared_disk | cut -d' ' -f1)
-if [ -z "$DEVICE" ]; then
-    echo "Shared storage device not found"
+echo "Mounting 9P shared folder..."
+mount -t 9p -o trans=virtio,version=9p2000.L hypercore_share ${mountPoint} || { 
+    echo "Failed to mount shared folder. Error: $?"
+    echo "Common issues:"
+    echo "  - Missing 9P kernel module"
+    echo "  - Insufficient permissions"
+    echo "  - Mount point already in use"
     exit 1
-fi
+}
 
-# Mount the device
-mount /dev/$DEVICE ${mountPoint}
-if [ $? -eq 0 ]; then
-    echo "Shared storage mounted successfully at ${mountPoint}"
-    # Set appropriate permissions
-    chmod 777 ${mountPoint}
-else
-    echo "Failed to mount shared storage"
-    exit 1
-fi
+echo "Success: Shared folder mounted at ${mountPoint}"
+echo "You can now access shared files at ${mountPoint}"
 `;
 
     // Write the mount script
     await fs.writeFile(mountScriptPath, scriptContent, { mode: 0o755 });
-    console.log(`Created mount script at ${mountScriptPath}`);
+    console.log('Mount script created successfully');
+
     return true;
   } catch (error) {
     console.error('Failed to create mount script:', error);
