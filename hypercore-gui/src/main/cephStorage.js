@@ -230,7 +230,7 @@ async function startVm(vmName, config) {
       throw new Error('Cannot start VM: OS not installed and no installation media (ISO) provided');
     }
 
-    // Ensure the VM directory exists
+    // Ensure VM directory exists
     await fs.mkdir(vmDir, { recursive: true });
 
     // Check if required files exist
@@ -269,6 +269,9 @@ async function startVm(vmName, config) {
       '-cpu host',
       `-smp ${config.cpus || STORAGE_CONFIG.defaultSizes.cpus}`,
       `-drive file="${diskImage}",format=qcow2,if=${STORAGE_CONFIG.defaultConfig.diskInterface},cache=${STORAGE_CONFIG.defaultConfig.diskCache},aio=${STORAGE_CONFIG.defaultConfig.diskAio},cache.direct=on`,
+      // Add shared storage if enabled
+      config.sharedStorageAttached ? `-drive file="${path.join(os.homedir(), '.hypercore', 'shared', 'shared.qcow2')}",format=qcow2,if=none,id=shared_drive` : '',
+      config.sharedStorageAttached ? '-device virtio-blk-pci,drive=shared_drive,id=shared_disk' : '',
       config.iso ? `-cdrom "${config.iso}"` : '',
       // Boot order: if installing OS, boot from CD, otherwise boot from HDD
       `-boot order=${!isInstalled && config.iso ? 'd' : 'c'}`,
@@ -281,10 +284,14 @@ async function startVm(vmName, config) {
       '-device virtio-serial-pci',  // Add virtio-serial controller
       '-device virtserialport,chardev=spicechannel0,name=com.redhat.spice.0',
       '-chardev spicevmc,id=spicechannel0,name=vdagent',
-      '-display gtk',
+      // QEMU guest agent configuration
+      '-device virtio-serial',
+      `-chardev socket,path=${path.join(vmDir, 'qga.sock')},server=on,wait=off,id=qga0`,
+      '-device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0',
+      // Use a single monitor socket for control
+      `-monitor unix:"${vmDir}/monitor.sock",server,nowait`,
       '-daemonize',
       `-pidfile "${vmDir}/qemu.pid"`,
-      `-monitor unix:"${vmDir}/monitor.sock",server,nowait`,
     ].filter(Boolean);
 
     // First try to run QEMU with version check
@@ -329,6 +336,24 @@ async function startVm(vmName, config) {
     try {
       process.kill(pid, 0);
       console.log('Process is running');
+
+      // Wait a bit longer for guest agent to be ready
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Copy scripts to VM if guest agent is enabled
+      if (config.guestAgent) {
+        try {
+          // Ensure mount and unmount scripts exist
+          await sharedStorage.createMountScript(vmName);
+          await sharedStorage.createUnmountScript(vmName);
+          
+          // Copy scripts to VM
+          await sharedStorage.copyScriptsToVM(vmName);
+          console.log('Scripts copied to VM successfully');
+        } catch (scriptError) {
+          console.warn('Failed to copy scripts to VM:', scriptError);
+        }
+      }
     } catch (e) {
       const log = await fs.readFile(logFile, 'utf8').catch(() => 'Could not read log file');
       console.error('QEMU log output:', log);

@@ -155,37 +155,6 @@ async function execCommandWithOutput(command, event = null) {
   });
 }
 
-// Helper function to initialize Ceph storage
-async function initializeCephStorage() {
-  try {
-    // Check if pool exists
-    const pools = await execCommandWithOutput(`ceph -c ${CEPH_CONF_PATH} osd pool ls`, null);
-    if (!pools.includes(CEPH_POOL_NAME)) {
-      // Create pool if it doesn't exist
-      await execCommandWithOutput(`ceph -c ${CEPH_CONF_PATH} osd pool create ${CEPH_POOL_NAME} 8`, null);
-    }
-    return true;
-  } catch (error) {
-    console.error('Failed to initialize Ceph storage:', error);
-    return false;
-  }
-}
-
-// Helper function to create RBD image for VM
-async function createRbdImage(vmName) {
-  const imageName = `${vmName}-disk`;
-  try {
-    await execCommandWithOutput(
-      `rbd -c ${CEPH_CONF_PATH} create ${CEPH_POOL_NAME}/${imageName} --size ${DEFAULT_VM_SIZE_GB}G`,
-      null
-    );
-    return `rbd:${CEPH_POOL_NAME}/${imageName}:conf=${CEPH_CONF_PATH}`;
-  } catch (error) {
-    console.error('Failed to create RBD image:', error);
-    throw error;
-  }
-}
-
 // Check if required commands are available
 async function checkDependencies() {
   console.log('Checking dependencies...'); // Debug log
@@ -265,7 +234,7 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso, storageSize })
     await sharedStorage.createMountScript(name);
     await sharedStorage.createUnmountScript(name);
     
-    // Store VM configuration
+    // Store VM configuration with guest agent enabled
     const config = {
       name,
       ram,
@@ -275,7 +244,13 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso, storageSize })
       storageSize,
       state: 'stopped',
       selected: false,
-      sharedStorageAttached: false
+      sharedStorageAttached: false,
+      guestAgent: true, // Enable QEMU guest agent
+      extraArgs: [
+        '-device', 'virtio-serial',
+        '-chardev', 'socket,path=/tmp/qga.sock,server=on,wait=off,id=qga0',
+        '-device', 'virtserialport,chardev=qga0,name=org.qemu.guest_agent.0'
+      ]
     };
     store.set(`vm.${name}`, config);
     
@@ -287,10 +262,9 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso, storageSize })
         vmPids.set(name, pid);
         store.set(`vm.${name}.state`, 'running');
         event.sender.send('terminal-output', 'VM started successfully');
-        event.sender.send('terminal-output', 'Note: Use the GUI to attach shared storage when needed');
+        event.sender.send('terminal-output', 'Note: Please install qemu-guest-agent package in the VM');
       } catch (startError) {
         event.sender.send('terminal-output', `Failed to start VM: ${startError.message}`);
-        // Clean up on start failure
         await storage.deleteVmImage(name);
         store.delete(`vm.${name}`);
         throw startError;
@@ -300,16 +274,13 @@ ipcMain.handle('create-vm', async (event, { name, ram, cpus, iso, storageSize })
     return { success: true };
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
-    // Clean up any created resources on failure, but preserve files for debugging
     try {
       if (name) {
         if (vmPids.has(name)) {
           await storage.forceKillVm(vmPids.get(name));
           vmPids.delete(name);
         }
-        // Don't delete VM image and files for debugging purposes
-        // await storage.deleteVmImage(name);
-        store.set(`vm.${name}.state`, 'failed');  // Mark as failed instead of deleting
+        store.set(`vm.${name}.state`, 'failed');
       }
     } catch (cleanupError) {
       event.sender.send('terminal-output', `Cleanup error: ${cleanupError.message}`);
@@ -662,22 +633,26 @@ ipcMain.handle('attach-shared-storage', async (event, { name }) => {
       throw new Error('VM not found');
     }
 
-    if (!vmPids.has(name)) {
-      throw new Error('VM is not running');
-    }
-
-    event.sender.send('terminal-output', `Attaching shared storage to VM ${name}...`);
-    await storage.attachSharedStorage(name);
-    
     // Update VM configuration
     store.set(`vm.${name}.sharedStorageAttached`, true);
     
-    event.sender.send('terminal-output', 'Shared storage attached successfully');
-    event.sender.send('terminal-output', 'Run mount-shared.sh inside the VM to mount the storage');
+    if (vmPids.has(name)) {
+      // If VM is running, try to hot-attach the storage
+      try {
+        await sharedStorage.attachSharedStorage(name);
+        event.sender.send('terminal-output', 'Shared storage attached successfully');
+        event.sender.send('terminal-output', 'Run mount-shared.sh inside the VM to mount the storage');
+      } catch (attachError) {
+        event.sender.send('terminal-output', 'Failed to hot-attach storage. Changes will take effect after VM restart.');
+      }
+    } else {
+      event.sender.send('terminal-output', 'Shared storage will be available next time the VM starts');
+    }
+    
     return { success: true };
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
-    throw error;
+    return { success: false, error: error.message };
   }
 });
 
@@ -688,23 +663,26 @@ ipcMain.handle('detach-shared-storage', async (event, { name }) => {
       throw new Error('VM not found');
     }
 
-    if (!vmPids.has(name)) {
-      throw new Error('VM is not running');
-    }
-
-    event.sender.send('terminal-output', `Detaching shared storage from VM ${name}...`);
-    event.sender.send('terminal-output', 'Please run unmount-shared.sh inside the VM first');
-    
-    await storage.detachSharedStorage(name);
-    
     // Update VM configuration
     store.set(`vm.${name}.sharedStorageAttached`, false);
     
-    event.sender.send('terminal-output', 'Shared storage detached successfully');
+    if (vmPids.has(name)) {
+      // If VM is running, try to hot-detach the storage
+      try {
+        event.sender.send('terminal-output', 'Please run unmount-shared.sh inside the VM first');
+        await sharedStorage.detachSharedStorage(name);
+        event.sender.send('terminal-output', 'Shared storage detached successfully');
+      } catch (detachError) {
+        event.sender.send('terminal-output', 'Failed to hot-detach storage. Changes will take effect after VM restart.');
+      }
+    } else {
+      event.sender.send('terminal-output', 'Shared storage will be detached next time the VM starts');
+    }
+    
     return { success: true };
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
-    throw error;
+    return { success: false, error: error.message };
   }
 });
 
@@ -719,11 +697,11 @@ ipcMain.handle('get-shared-storage-status', async (event, { name }) => {
       return { attached: false };
     }
 
-    const attached = await storage.isSharedStorageAttached(name);
+    const attached = await sharedStorage.isSharedStorageAttached(name);
     return { attached };
   } catch (error) {
     console.error('Failed to get shared storage status:', error);
-    return { attached: false };
+    return { attached: false, error: error.message };
   }
 });
 
@@ -747,14 +725,30 @@ ipcMain.handle('update-vm-settings', async (event, { name, settings }) => {
       }
     }
 
-    // Handle shared storage toggle if VM is running
-    if (isRunning && settings.sharedStorageAttached !== config.sharedStorageAttached) {
+    // Handle shared storage toggle
+    if (settings.sharedStorageAttached !== config.sharedStorageAttached) {
       if (settings.sharedStorageAttached) {
-        await storage.attachSharedStorage(name);
-        event.sender.send('terminal-output', 'Run mount-shared.sh inside the VM to mount the storage');
+        if (isRunning) {
+          try {
+            await sharedStorage.attachSharedStorage(name);
+            event.sender.send('terminal-output', 'Run mount-shared.sh inside the VM to mount the storage');
+          } catch (attachError) {
+            event.sender.send('terminal-output', 'Failed to hot-attach storage. Changes will take effect after VM restart.');
+          }
+        } else {
+          event.sender.send('terminal-output', 'Shared storage will be available next time the VM starts');
+        }
       } else {
-        event.sender.send('terminal-output', 'Please run unmount-shared.sh inside the VM first');
-        await storage.detachSharedStorage(name);
+        if (isRunning) {
+          try {
+            event.sender.send('terminal-output', 'Please run unmount-shared.sh inside the VM first');
+            await sharedStorage.detachSharedStorage(name);
+          } catch (detachError) {
+            event.sender.send('terminal-output', 'Failed to hot-detach storage. Changes will take effect after VM restart.');
+          }
+        } else {
+          event.sender.send('terminal-output', 'Shared storage will be detached next time the VM starts');
+        }
       }
       store.set(`vm.${name}.sharedStorageAttached`, settings.sharedStorageAttached);
     }
@@ -845,6 +839,81 @@ ipcMain.handle('set-boot-order', async (event, { name, bootOrder }) => {
     return { success: true };
   } catch (error) {
     event.sender.send('terminal-output', `Error: ${error.message}`);
+    throw error;
+  }
+});
+
+// Shared storage management
+ipcMain.handle('get-shared-folder-info', async () => {
+  try {
+    return sharedStorage.getVmSharedConfig();
+  } catch (error) {
+    console.error('Failed to get shared folder info:', error);
+    throw error;
+  }
+});
+
+// Shared folder management
+ipcMain.handle('list-shared-files', async (event, { path }) => {
+  try {
+    const items = await fs.readdir(path, { withFileTypes: true });
+    return items.map(item => ({
+      name: item.name,
+      isDirectory: item.isDirectory()
+    }));
+  } catch (error) {
+    console.error('Failed to list shared files:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('create-shared-folder', async (event, { path, folderName }) => {
+  try {
+    const folderPath = `${path}/${folderName}`;
+    await fs.mkdir(folderPath);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to create shared folder:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('import-shared-file', async (event, { targetPath }) => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      title: 'Select File to Import'
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      const sourcePath = result.filePaths[0];
+      const fileName = path.basename(sourcePath);
+      const destinationPath = path.join(targetPath, fileName);
+      
+      await fs.copyFile(sourcePath, destinationPath);
+      return { success: true };
+    }
+    return { success: false };
+  } catch (error) {
+    console.error('Failed to import file:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('delete-shared-item', async (event, { path, itemName }) => {
+  try {
+    const itemPath = `${path}/${itemName}`;
+    const stats = await fs.stat(itemPath);
+    
+    if (stats.isDirectory()) {
+      await fs.rm(itemPath, { recursive: true });
+    } else {
+      await fs.unlink(itemPath);
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to delete shared item:', error);
     throw error;
   }
 });

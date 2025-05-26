@@ -44,6 +44,7 @@ import ResourceMonitor from './components/ResourceMonitor';
 import FileDialog from './components/FileDialog';
 import { IpcRendererEvent } from 'electron';
 import path from 'path';
+import SharedFolderDialog from './components/SharedFolderDialog';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -83,6 +84,7 @@ function App() {
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [selectedVM, setSelectedVM] = useState<string | null>(null);
   const [vmSettings, setVmSettings] = useState<Partial<VM>>({});
+  const [sharedFolderDialogOpen, setSharedFolderDialogOpen] = useState(false);
 
   useEffect(() => {
     loadVMs();
@@ -339,6 +341,13 @@ function App() {
               onClick={() => {/* TODO: Implement settings */}}
             />
           </MenuContainer>
+          <IconButton
+            color="inherit"
+            onClick={() => setSharedFolderDialogOpen(true)}
+            title="Shared Folder Info"
+          >
+            <FolderIcon />
+          </IconButton>
         </Toolbar>
       </AppBar>
 
@@ -729,6 +738,11 @@ function App() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <SharedFolderDialog
+        open={sharedFolderDialogOpen}
+        onClose={() => setSharedFolderDialogOpen(false)}
+      />
     </Box>
   );
 }
