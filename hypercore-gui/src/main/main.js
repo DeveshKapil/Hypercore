@@ -8,6 +8,8 @@ const os = require('os');
 const storage = require('./cephStorage');
 const sharedStorage = require('./sharedStorage');
 const { STORAGE_CONFIG } = require('./cephStorage');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
 const store = new Store();
 const cpu = osu.cpu;
@@ -360,15 +362,31 @@ ipcMain.handle('start-vm', async (event, { name }) => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     try {
+      // Kill any existing remote-viewer processes for this VM
+      await execPromise(`pkill -f "remote-viewer.*${spiceSocket}"`).catch(() => {});
+      
       // Check if remote-viewer is installed
       await execPromise('which remote-viewer');
       
-      // Launch SPICE viewer
+      // Launch SPICE viewer with full socket path
       const spiceCmd = `remote-viewer spice+unix://${spiceSocket} &`;
       await execPromise(spiceCmd);
       event.sender.send('terminal-output', 'SPICE viewer launched');
     } catch (error) {
-      event.sender.send('terminal-output', 'Warning: Failed to launch SPICE viewer. Please install virt-viewer package: sudo apt-get install virt-viewer');
+      if (error.message.includes('which remote-viewer')) {
+        event.sender.send('terminal-output', 'Warning: remote-viewer not found. Installing virt-viewer package...');
+        try {
+          await execPromise('sudo apt-get update && sudo apt-get install -y virt-viewer');
+          // Try launching viewer again after installation
+          const spiceCmd = `remote-viewer spice+unix://${spiceSocket} &`;
+          await execPromise(spiceCmd);
+          event.sender.send('terminal-output', 'SPICE viewer installed and launched');
+        } catch (installError) {
+          event.sender.send('terminal-output', `Warning: Failed to install virt-viewer. Please install it manually: sudo apt-get install virt-viewer`);
+        }
+      } else {
+        event.sender.send('terminal-output', `Warning: Failed to launch SPICE viewer: ${error.message}`);
+      }
     }
 
     event.sender.send('terminal-output', 'VM started successfully');

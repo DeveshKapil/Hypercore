@@ -19,6 +19,11 @@ interface SystemMetrics {
   };
 }
 
+interface DriveInfo {
+  totalGb: number;
+  freeGb: number;
+}
+
 export class MonitoringService {
   private monitorSockets: Map<string, Socket> = new Map();
   private metricsInterval: NodeJS.Timeout | null = null;
@@ -45,11 +50,13 @@ export class MonitoringService {
 
     // Get disk metrics for the root directory
     const disk = await new Promise<{ used: number; total: number; percentage: number }>((resolve) => {
-      osu.drive.info().then(info => {
+      osu.drive.info('/').then(info => {
+        const totalGb = parseFloat(info.totalGb);
+        const freeGb = parseFloat(info.freeGb);
         resolve({
-          used: (info.totalGb - info.freeGb) * 1024 * 1024 * 1024,
-          total: info.totalGb * 1024 * 1024 * 1024,
-          percentage: ((info.totalGb - info.freeGb) / info.totalGb) * 100
+          used: (totalGb - freeGb) * 1024 * 1024 * 1024,
+          total: totalGb * 1024 * 1024 * 1024,
+          percentage: ((totalGb - freeGb) / totalGb) * 100
         });
       });
     });
