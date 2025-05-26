@@ -31,3 +31,6 @@ snapshot a vm
 update a vm
 store vm configs
 restore vm
+
+
+remote-viewer spice+unix:///home/dev/.hypercore/vms/<vm-name>/spice.sock
