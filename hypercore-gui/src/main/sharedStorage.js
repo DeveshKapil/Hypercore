@@ -19,40 +19,28 @@ async function initializeSharedStorage() {
     
     // Create a shared disk image if it doesn't exist
     const sharedDisk = path.join(SHARED_CONFIG.baseDir, 'shared.qcow2');
-    
-    // Always recreate the shared disk to ensure proper initialization
-    try {
-      await fs.unlink(sharedDisk).catch(() => {});
-      console.log('Removed existing shared disk for recreation');
-    } catch (error) {
-      // Ignore deletion errors
+    if (!await fileExists(sharedDisk)) {
+      // Create shared disk
+      await execPromise(`qemu-img create -f qcow2 "${sharedDisk}" ${SHARED_CONFIG.defaultSize}G`);
+      console.log('Created shared storage disk:', sharedDisk);
+    } else {
+      // Check disk size and recreate if too small
+      const { stdout: info } = await execPromise(`qemu-img info "${sharedDisk}"`);
+      const sizeMatch = info.match(/virtual size: ([0-9.]+) ([GMK])iB/);
+      if (sizeMatch) {
+        const size = parseFloat(sizeMatch[1]);
+        const unit = sizeMatch[2];
+        const sizeInGB = unit === 'G' ? size : unit === 'M' ? size/1024 : size/1024/1024;
+        
+        if (sizeInGB < SHARED_CONFIG.defaultSize) {
+          console.log(`Existing shared disk too small (${sizeInGB}GB < ${SHARED_CONFIG.defaultSize}GB), recreating...`);
+          await fs.unlink(sharedDisk);
+          await execPromise(`qemu-img create -f qcow2 "${sharedDisk}" ${SHARED_CONFIG.defaultSize}G`);
+          console.log('Recreated shared storage disk:', sharedDisk);
+        }
+      }
     }
 
-    // Create new shared disk with proper size
-    await execPromise(`qemu-img create -f qcow2 "${sharedDisk}" ${SHARED_CONFIG.defaultSize}G`);
-    console.log('Created shared storage disk:', sharedDisk);
-
-    // Format the disk with ext4 filesystem
-    try {
-      // Create a temporary loop device
-      const { stdout: loopDev } = await execPromise(`sudo losetup --find --show "${sharedDisk}"`);
-      const device = loopDev.trim();
-      
-      // Format with ext4
-      await execPromise(`sudo mkfs.ext4 ${device}`);
-      
-      // Cleanup loop device
-      await execPromise(`sudo losetup -d ${device}`);
-      
-      console.log('Formatted shared disk with ext4 filesystem');
-    } catch (formatError) {
-      console.warn('Failed to format shared disk:', formatError);
-      // Continue anyway as the guest can format it
-    }
-
-    // Ensure proper permissions
-    await execPromise(`chmod 666 "${sharedDisk}"`);
-    
     return true;
   } catch (error) {
     console.error('Failed to initialize shared storage:', error);
@@ -129,72 +117,13 @@ async function attachSharedStorage(vmName) {
     const monitorSocket = path.join(vmDir, 'monitor.sock');
     const { diskPath } = getVmSharedConfig();
 
-    // Verify monitor socket exists and is accessible
-    try {
-      await fs.access(monitorSocket);
-    } catch (error) {
-      throw new Error(`Monitor socket not accessible: ${error.message}`);
-    }
+    // First add the drive with a specific ID
+    const driveAddCmd = `echo "drive_add 0 file=${diskPath},if=none,id=shared_drive,format=qcow2" | socat - UNIX-CONNECT:${monitorSocket}`;
+    await execPromise(driveAddCmd);
 
-    // Verify shared disk exists and is accessible
-    try {
-      await fs.access(diskPath);
-      const { stdout: diskInfo } = await execPromise(`qemu-img info "${diskPath}"`);
-      console.log('Shared disk info:', diskInfo);
-    } catch (error) {
-      throw new Error(`Shared disk not accessible: ${error.message}`);
-    }
-
-    // Use VM-specific IDs to allow multiple connections
-    const driveId = `shared_drive_${vmName}`;
-    const deviceId = `shared_disk_${vmName}`;
-
-    // Test monitor connection
-    try {
-      await execPromise(`echo "info status" | socat - UNIX-CONNECT:${monitorSocket}`);
-    } catch (error) {
-      throw new Error(`Cannot connect to VM monitor: ${error.message}`);
-    }
-
-    console.log(`Attaching shared storage to VM ${vmName}...`);
-
-    // Add the drive with shared=on to allow multiple connections
-    const driveAddCmd = `echo "drive_add 0 file=${diskPath},if=none,id=${driveId},format=qcow2,share-rw=on" | socat - UNIX-CONNECT:${monitorSocket}`;
-    try {
-      const { stdout: driveResult } = await execPromise(driveAddCmd);
-      console.log('Drive add result:', driveResult);
-    } catch (error) {
-      throw new Error(`Failed to add drive: ${error.message}`);
-    }
-
-    // Wait a moment for drive to be recognized
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Create the virtio-blk device using VM-specific IDs and serial number
-    const deviceAddCmd = `echo "device_add virtio-blk-pci,drive=${driveId},id=${deviceId},serial=${deviceId}" | socat - UNIX-CONNECT:${monitorSocket}`;
-    try {
-      const { stdout: deviceResult } = await execPromise(deviceAddCmd);
-      console.log('Device add result:', deviceResult);
-    } catch (error) {
-      // Try to clean up the drive if device add fails
-      try {
-        await execPromise(`echo "drive_del ${driveId}" | socat - UNIX-CONNECT:${monitorSocket}`);
-      } catch (cleanupError) {
-        console.error('Failed to clean up drive after device add failure:', cleanupError);
-      }
-      throw new Error(`Failed to add device: ${error.message}`);
-    }
-
-    // Verify the device was added successfully
-    try {
-      const { stdout: blockInfo } = await execPromise(`echo "info block" | socat - UNIX-CONNECT:${monitorSocket}`);
-      if (!blockInfo.includes(driveId)) {
-        throw new Error('Drive not found in block devices after addition');
-      }
-      console.log('Shared storage attached successfully');
-    } catch (error) {
-      throw new Error(`Failed to verify device addition: ${error.message}`);
-    }
+    // Then create the virtio-blk device using the drive ID
+    const deviceAddCmd = `echo "device_add virtio-blk-pci,drive=shared_drive,id=shared_disk" | socat - UNIX-CONNECT:${monitorSocket}`;
+    await execPromise(deviceAddCmd);
 
     return true;
   } catch (error) {
@@ -209,16 +138,12 @@ async function detachSharedStorage(vmName) {
     const vmDir = path.join(os.homedir(), '.hypercore', 'vms', vmName);
     const monitorSocket = path.join(vmDir, 'monitor.sock');
 
-    // Use VM-specific IDs when detaching
-    const deviceId = `shared_disk_${vmName}`;
-    const driveId = `shared_drive_${vmName}`;
-
     // First remove the device
-    const deviceDelCmd = `echo "device_del ${deviceId}" | socat - UNIX-CONNECT:${monitorSocket}`;
+    const deviceDelCmd = `echo "device_del shared_disk" | socat - UNIX-CONNECT:${monitorSocket}`;
     await execPromise(deviceDelCmd);
 
     // Then remove the drive
-    const driveDelCmd = `echo "drive_del ${driveId}" | socat - UNIX-CONNECT:${monitorSocket}`;
+    const driveDelCmd = `echo "drive_del shared_drive" | socat - UNIX-CONNECT:${monitorSocket}`;
     await execPromise(driveDelCmd);
 
     return true;
@@ -364,18 +289,8 @@ fi
 # Create mount point if it doesn't exist
 mkdir -p ${mountPoint}
 
-# Get the device name for shared storage by checking virtio devices
-for device in /sys/block/vd*; do
-    if [ -e "$device" ]; then
-        dev_name=$(basename $device)
-        # Check if this is our shared storage by looking at the device ID
-        if grep -q "shared_disk_${vmName}" "$device/device/serial" 2>/dev/null; then
-            DEVICE=$dev_name
-            break
-        fi
-    fi
-done
-
+# Get the device name for shared storage
+DEVICE=$(lsblk -o NAME,SERIAL | grep shared_disk | cut -d' ' -f1)
 if [ -z "$DEVICE" ]; then
     echo "Shared storage device not found"
     exit 1

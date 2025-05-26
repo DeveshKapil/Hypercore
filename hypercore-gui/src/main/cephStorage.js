@@ -270,8 +270,8 @@ async function startVm(vmName, config) {
       `-smp ${config.cpus || STORAGE_CONFIG.defaultSizes.cpus}`,
       `-drive file="${diskImage}",format=qcow2,if=${STORAGE_CONFIG.defaultConfig.diskInterface},cache=${STORAGE_CONFIG.defaultConfig.diskCache},aio=${STORAGE_CONFIG.defaultConfig.diskAio},cache.direct=on`,
       // Add shared storage if enabled
-      config.sharedStorageAttached ? `-drive file="${path.join(os.homedir(), '.hypercore', 'shared', 'shared.qcow2')}",format=qcow2,if=none,id=shared_drive_${vmName},share-rw=on` : '',
-      config.sharedStorageAttached ? `-device virtio-blk-pci,drive=shared_drive_${vmName},id=shared_disk_${vmName},serial=shared_disk_${vmName}` : '',
+      config.sharedStorageAttached ? `-drive file="${path.join(os.homedir(), '.hypercore', 'shared', 'shared.qcow2')}",format=qcow2,if=none,id=shared_drive` : '',
+      config.sharedStorageAttached ? '-device virtio-blk-pci,drive=shared_drive,id=shared_disk' : '',
       config.iso ? `-cdrom "${config.iso}"` : '',
       // Boot order: if installing OS, boot from CD, otherwise boot from HDD
       `-boot order=${!isInstalled && config.iso ? 'd' : 'c'}`,
